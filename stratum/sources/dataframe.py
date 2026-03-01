@@ -29,11 +29,11 @@ class DataFrameSource(DataSource):
         rows = await source.read(entity_id="u123")
     """
 
-    def __init__(self, df: "pd.DataFrame", entity_col: str = "entity_id") -> None:
+    def __init__(self, df: pd.DataFrame, entity_col: str = "entity_id") -> None:
         self.df = df
         self.entity_col = entity_col
 
-    async def read(self, entity_id: str | None = None, **kwargs: Any) -> "pd.DataFrame":
+    async def read(self, entity_id: str | None = None, **kwargs: Any) -> pd.DataFrame:
         """Return a copy of rows whose entity column matches *entity_id*.
 
         Args:
@@ -49,9 +49,7 @@ class DataFrameSource(DataSource):
         """
         try:
             if entity_id is None:
-                raise ValueError(
-                    f"entity_id is required for {type(self).__name__}"
-                )
+                raise ValueError(f"entity_id is required for {type(self).__name__}")
             if self.entity_col not in self.df.columns:
                 raise ValueError(
                     f"Column '{self.entity_col}' not found in DataFrame. "

@@ -36,11 +36,7 @@ class GenerationReport:
         return len(self.failed)
 
     def __repr__(self) -> str:
-        return (
-            f"GenerationReport("
-            f"succeeded={self.success_count}, "
-            f"failed={self.failure_count})"
-        )
+        return f"GenerationReport(succeeded={self.success_count}, failed={self.failure_count})"
 
 
 class Pipeline:

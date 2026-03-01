@@ -58,7 +58,5 @@ class SourceBundle(DataSource):
             ``{source_name: result}`` for each source in the bundle.
         """
         names = list(self.sources.keys())
-        results = await asyncio.gather(
-            *[self.sources[name].read(**kwargs) for name in names]
-        )
-        return dict(zip(names, results))
+        results = await asyncio.gather(*[self.sources[name].read(**kwargs) for name in names])
+        return dict(zip(names, results, strict=True))

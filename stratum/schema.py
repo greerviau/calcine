@@ -162,7 +162,7 @@ class NDArray(FeatureType):
         if value.ndim != len(self.shape):
             errors.append(f"Expected ndim={len(self.shape)}, got ndim={value.ndim}")
         else:
-            for i, (expected, actual) in enumerate(zip(self.shape, value.shape)):
+            for i, (expected, actual) in enumerate(zip(self.shape, value.shape, strict=True)):
                 if expected is not None and expected != actual:
                     errors.append(f"Dimension {i}: expected {expected}, got {actual}")
 

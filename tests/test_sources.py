@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+
 from stratum.exceptions import SourceError
 from stratum.sources import DataFrameSource, DataSource, DirectorySource, FileSource, SourceBundle
 
@@ -221,7 +222,6 @@ def test_bundle_requires_at_least_one_source():
 @pytest.mark.asyncio
 async def test_bundle_in_pipeline(sample_df):
     """SourceBundle integrates end-to-end with Pipeline."""
-    import pandas as pd
     from stratum import Pipeline
     from stratum.features.base import Feature
     from stratum.stores import MemoryStore

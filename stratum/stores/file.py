@@ -39,10 +39,10 @@ class FileStore(FeatureStore):
         self.path = Path(path)
         self.serializer: Serializer = serializer if serializer is not None else PickleSerializer()
 
-    def _entity_path(self, feature: "Feature", entity_id: str) -> Path:
+    def _entity_path(self, feature: Feature, entity_id: str) -> Path:
         return self.path / self._feature_key(feature) / f"{entity_id}.bin"
 
-    async def write(self, feature: "Feature", entity_id: str, data: Any) -> None:
+    async def write(self, feature: Feature, entity_id: str, data: Any) -> None:
         path = self._entity_path(feature, entity_id)
         loop = asyncio.get_running_loop()
 
@@ -60,7 +60,7 @@ class FileStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def read(self, feature: "Feature", entity_id: str) -> Any:
+    async def read(self, feature: Feature, entity_id: str) -> Any:
         path = self._entity_path(feature, entity_id)
         if not path.exists():
             raise KeyError(
@@ -80,10 +80,10 @@ class FileStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def exists(self, feature: "Feature", entity_id: str) -> bool:
+    async def exists(self, feature: Feature, entity_id: str) -> bool:
         return self._entity_path(feature, entity_id).exists()
 
-    async def delete(self, feature: "Feature", entity_id: str) -> None:
+    async def delete(self, feature: Feature, entity_id: str) -> None:
         path = self._entity_path(feature, entity_id)
         if not path.exists():
             raise KeyError(

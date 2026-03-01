@@ -43,7 +43,7 @@ class ParquetStore(FeatureStore):
     def __init__(self, path: str) -> None:
         self.path = Path(path)
 
-    def _feature_path(self, feature: "Feature") -> Path:
+    def _feature_path(self, feature: Feature) -> Path:
         return self.path / f"{self._feature_key(feature)}.parquet"
 
     @staticmethod
@@ -57,7 +57,7 @@ class ParquetStore(FeatureStore):
                 "Install with: pip install stratum[parquet]"
             ) from exc
 
-    async def write(self, feature: "Feature", entity_id: str, data: Any) -> None:
+    async def write(self, feature: Feature, entity_id: str, data: Any) -> None:
         self._check_deps()
         import pandas as pd
 
@@ -93,7 +93,7 @@ class ParquetStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def read(self, feature: "Feature", entity_id: str) -> Any:
+    async def read(self, feature: Feature, entity_id: str) -> Any:
         self._check_deps()
 
         path = self._feature_path(feature)
@@ -127,7 +127,7 @@ class ParquetStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def exists(self, feature: "Feature", entity_id: str) -> bool:
+    async def exists(self, feature: Feature, entity_id: str) -> bool:
         self._check_deps()
 
         path = self._feature_path(feature)
@@ -144,7 +144,7 @@ class ParquetStore(FeatureStore):
 
         return await loop.run_in_executor(None, _check)
 
-    async def delete(self, feature: "Feature", entity_id: str) -> None:
+    async def delete(self, feature: Feature, entity_id: str) -> None:
         self._check_deps()
 
         path = self._feature_path(feature)

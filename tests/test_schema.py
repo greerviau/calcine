@@ -3,19 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
+
 from stratum.schema import (
-    AnyType,
-    Boolean,
-    Bytes,
-    Category,
     FeatureSchema,
-    Float32,
-    Float64,
-    Int32,
-    Int64,
-    NDArray,
-    String,
     types,
 )
 

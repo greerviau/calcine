@@ -6,8 +6,9 @@ import tempfile
 
 import numpy as np
 import pytest
+
 from stratum.features.base import Feature
-from stratum.serializers import JSONSerializer, NumpySerializer, PickleSerializer
+from stratum.serializers import JSONSerializer, NumpySerializer
 from stratum.stores import FileStore, MemoryStore
 
 # Optional parquet deps

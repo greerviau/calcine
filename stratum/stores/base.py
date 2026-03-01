@@ -47,7 +47,7 @@ class FeatureStore(ABC):
     """
 
     @abstractmethod
-    async def write(self, feature: "Feature", entity_id: str, data: Any) -> None:
+    async def write(self, feature: Feature, entity_id: str, data: Any) -> None:
         """Persist a feature value for an entity.
 
         Args:
@@ -61,7 +61,7 @@ class FeatureStore(ABC):
         ...
 
     @abstractmethod
-    async def read(self, feature: "Feature", entity_id: str) -> Any:
+    async def read(self, feature: Feature, entity_id: str) -> Any:
         """Retrieve a stored feature value for an entity.
 
         Args:
@@ -78,7 +78,7 @@ class FeatureStore(ABC):
         ...
 
     @abstractmethod
-    async def exists(self, feature: "Feature", entity_id: str) -> bool:
+    async def exists(self, feature: Feature, entity_id: str) -> bool:
         """Check whether a feature value exists for an entity.
 
         Args:
@@ -91,7 +91,7 @@ class FeatureStore(ABC):
         ...
 
     @abstractmethod
-    async def delete(self, feature: "Feature", entity_id: str) -> None:
+    async def delete(self, feature: Feature, entity_id: str) -> None:
         """Delete the stored feature value for an entity.
 
         Args:
@@ -104,7 +104,7 @@ class FeatureStore(ABC):
         """
         ...
 
-    def _feature_key(self, feature: "Feature") -> str:
+    def _feature_key(self, feature: Feature) -> str:
         """Return a stable string namespace key for a feature instance.
 
         Uses the class name.  Override to customise namespacing.

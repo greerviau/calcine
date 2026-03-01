@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+
 from stratum import GenerationReport, Pipeline
 from stratum.features.base import Feature
 from stratum.schema import FeatureSchema, types
