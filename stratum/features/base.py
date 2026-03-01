@@ -1,0 +1,94 @@
+"""Abstract base class for feature extractors."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar
+
+from ..schema import FeatureSchema
+
+
+class Feature(ABC):
+    """Contract for all feature extractors in the stratum pipeline.
+
+    A ``Feature`` transforms raw data (from a ``DataSource``) into a
+    structured, typed feature value.  The full extraction lifecycle is::
+
+        raw → pre_extract(raw) → extract(preprocessed, context)
+            → post_extract(result) → validate(result)
+
+    Subclasses must implement ``extract``.  All other methods have
+    sensible pass-through defaults.
+
+    The ``schema`` class attribute, if set to a ``FeatureSchema``, enables
+    automatic validation of the extracted result.
+
+    Example::
+
+        class EmbeddingFeature(Feature):
+            schema = FeatureSchema({"vec": types.NDArray(shape=(128,), dtype="float32")})
+
+            async def extract(self, raw: str, context: dict) -> dict:
+                return {"vec": encode(raw)}
+    """
+
+    schema: ClassVar[FeatureSchema | None] = None
+
+    @abstractmethod
+    async def extract(self, raw: Any, context: dict) -> Any:
+        """Extract the feature value from raw source data.
+
+        Args:
+            raw: Raw data returned by the ``DataSource``.  The type depends
+                on the source implementation.
+            context: Arbitrary dict supplied by the caller (e.g. timestamps,
+                model version, experiment flags).
+
+        Returns:
+            Extracted feature value.  Should conform to ``schema`` if set.
+        """
+        ...
+
+    async def pre_extract(self, raw: Any) -> Any:
+        """Pre-processing hook executed before ``extract``.
+
+        Override to normalise or filter raw data before the main extraction
+        logic.  The default is a pass-through.
+
+        Args:
+            raw: Raw data from the source.
+
+        Returns:
+            Pre-processed data passed to ``extract``.
+        """
+        return raw
+
+    async def post_extract(self, result: Any) -> Any:
+        """Post-processing hook executed after ``extract``.
+
+        Override to round, clip, cast, or otherwise transform the raw
+        extraction output.  The default is a pass-through.
+
+        Args:
+            result: Value returned by ``extract``.
+
+        Returns:
+            Post-processed result written to the store and validated.
+        """
+        return result
+
+    async def validate(self, result: Any) -> list[str]:
+        """Validate the (post-processed) extraction result.
+
+        Uses ``schema.validate`` if ``schema`` is set; otherwise returns
+        an empty list (no validation).
+
+        Args:
+            result: Post-processed feature value.
+
+        Returns:
+            List of validation error strings.  Empty means valid.
+        """
+        if self.schema is not None:
+            return self.schema.validate(result)
+        return []
