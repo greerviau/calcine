@@ -443,6 +443,60 @@ async def test_generate_overwrite_false_progress_includes_skips(df):
 
 
 # ---------------------------------------------------------------------------
+# generate() — store_results=False
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_store_results_false_values_are_none(df):
+    """store_results=False: succeeded keys exist but values are None."""
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
+    report = await pipeline.generate(entity_ids=["u1", "u2"], store_results=False)
+
+    assert report.success_count == 2
+    assert "u1" in report.succeeded
+    assert "u2" in report.succeeded
+    assert report.succeeded["u1"] is None
+    assert report.succeeded["u2"] is None
+
+
+@pytest.mark.asyncio
+async def test_generate_store_results_false_values_still_written_to_store(df):
+    """store_results=False does not affect what gets written to the store."""
+    store = MemoryStore()
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
+    await pipeline.generate(entity_ids=["u1"], store_results=False)
+
+    value = await pipeline.retrieve("u1")
+    assert value["mean_value"] == 15.0
+
+
+@pytest.mark.asyncio
+async def test_generate_store_results_false_failures_still_recorded(df):
+    """Failures are recorded normally even when store_results=False."""
+    pipeline = Pipeline(source=DataFrameSource(df), feature=FailingFeature(), store=MemoryStore())
+    report = await pipeline.generate(entity_ids=["u1"], store_results=False)
+
+    assert report.failure_count == 1
+    assert "u1" in report.failed
+
+
+@pytest.mark.asyncio
+async def test_generate_store_results_false_with_batch_size(wide_df):
+    """store_results=False works with batch_size > 1."""
+    pipeline = Pipeline(
+        source=DataFrameSource(wide_df),
+        feature=BatchTrackingFeature(),
+        store=MemoryStore(),
+    )
+    ids = [f"u{i}" for i in range(1, 7)]
+    report = await pipeline.generate(entity_ids=ids, batch_size=3, store_results=False)
+
+    assert report.success_count == 6
+    assert all(v is None for v in report.succeeded.values())
+
+
+# ---------------------------------------------------------------------------
 # generate() — on_progress callback
 # ---------------------------------------------------------------------------
 

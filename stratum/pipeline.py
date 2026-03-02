@@ -18,7 +18,8 @@ class GenerationReport:
 
     Attributes:
         succeeded: Mapping of ``entity_id`` to extracted feature value for
-            every entity that was processed without error.
+            every entity that was processed without error.  Values are
+            ``None`` when ``generate()`` is called with ``store_results=False``.
         failed: Mapping of ``entity_id`` to a list of error strings for
             every entity whose processing failed (source read error,
             extraction error, or schema violation).
@@ -95,6 +96,7 @@ class Pipeline:
         overwrite: bool,
         report: GenerationReport,
         feature_name: str,
+        store_results: bool,
     ) -> None:
         """Process a single entity and update *report* in place."""
         try:
@@ -113,7 +115,7 @@ class Pipeline:
                 return
 
             await self.store.write(self.feature, entity_id, result)
-            report.succeeded[entity_id] = result
+            report.succeeded[entity_id] = result if store_results else None
 
         except Exception as exc:
             report.failed[entity_id] = [
@@ -129,6 +131,7 @@ class Pipeline:
         report: GenerationReport,
         feature_name: str,
         on_entity_done: Callable[[], None] | None,
+        store_results: bool,
     ) -> None:
         """Process a batch of entities with a single ``extract_batch`` call.
 
@@ -225,7 +228,7 @@ class Pipeline:
                         report.failed[entity_id] = errors
                     else:
                         await self.store.write(self.feature, entity_id, result)
-                        report.succeeded[entity_id] = result
+                        report.succeeded[entity_id] = result if store_results else None
                 except Exception as exc:
                     report.failed[entity_id] = [
                         f"Unhandled exception in pipeline for feature '{feature_name}', "
@@ -245,6 +248,7 @@ class Pipeline:
         concurrency: int = 1,
         batch_size: int = 1,
         overwrite: bool = True,
+        store_results: bool = True,
         on_progress: Callable[[int, int, GenerationReport], None] | None = None,
     ) -> GenerationReport:
         """Extract and store features for a collection of entities.
@@ -303,6 +307,12 @@ class Pipeline:
             overwrite: When ``False``, entities that already have a stored
                 value are skipped without re-extracting.  Skipped entities
                 appear in ``GenerationReport.skipped``.  Defaults to ``True``.
+            store_results: When ``True`` (default), extracted values are kept
+                in ``GenerationReport.succeeded`` so callers can inspect them
+                without a separate ``retrieve`` call.  Set to ``False`` for
+                large runs where holding all results in memory is undesirable;
+                succeeded entity IDs are still tracked (so ``success_count``
+                and membership checks work) but the values are ``None``.
             on_progress: Optional sync callback invoked after each entity
                 resolves (succeeds, fails, or is skipped).  Receives
                 ``(completed: int, total: int, report: GenerationReport)``.
@@ -359,7 +369,7 @@ class Pipeline:
                 if batch_size == 1:
                     for entity_id in entities:
                         await self._process_entity(
-                            entity_id, context, overwrite, report, feature_name
+                            entity_id, context, overwrite, report, feature_name, store_results
                         )
                         completed += 1
                         if on_progress is not None:
@@ -375,7 +385,13 @@ class Pipeline:
                     for i in range(0, len(entities), batch_size):
                         sub_batch = entities[i : i + batch_size]
                         await self._process_batch(
-                            sub_batch, context, overwrite, report, feature_name, on_entity_done
+                            sub_batch,
+                            context,
+                            overwrite,
+                            report,
+                            feature_name,
+                            on_entity_done,
+                            store_results,
                         )
 
         await asyncio.gather(*[run_partition(entities) for entities in partition_map.values()])
