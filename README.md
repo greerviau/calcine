@@ -47,44 +47,62 @@ pip install "calcine[dev]"           # + test/lint tools
 
 ```python
 import asyncio
-import pandas as pd
 from calcine import Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
-from calcine.sources import DataFrameSource
+from calcine.sources.base import DataSource
 from calcine.stores import MemoryStore
 
 
-class MeanPurchaseValue(Feature):
-    schema = FeatureSchema({"mean_value": types.Float64(nullable=False, default=0.0)})
+# --- 1. Define your data source (any async I/O: DB, API, S3, …) ---
 
-    async def extract(self, raw, context):
-        if raw.empty:
-            raise ValueError("No data for this entity")
-        return {"mean_value": float(raw["amount"].mean())}
+class UserDBSource(DataSource):
+    async def read(self, entity_id: str, **kwargs) -> dict:
+        return await db.fetch_user(entity_id)  # your async call here
 
 
-df = pd.DataFrame({
-    "entity_id": ["u1", "u1", "u2"],
-    "amount":    [10.0, 20.0, 15.0],
-})
+# --- 2. Define a schema-validated feature ---
+
+class UserEngagementFeature(Feature):
+    schema = FeatureSchema({
+        "spend_tier":  types.Category(categories=["low", "mid", "high", "whale"]),
+        "event_rate":  types.Float64(nullable=False),
+        "total_spend": types.Float64(nullable=False),
+    })
+
+    async def extract(self, raw: dict, context: dict, entity_id=None) -> dict:
+        spend = raw["total_spend"]
+        tier = "low" if spend < 100 else "mid" if spend < 1000 else "high" if spend < 3000 else "whale"
+        return {"spend_tier": tier, "event_rate": raw["event_count"] / raw["days_active"], "total_spend": spend}
+
+
+# --- 3. Build and run ---
 
 pipeline = Pipeline(
-    source=DataFrameSource(df),
-    feature=MeanPurchaseValue(),
+    source=UserDBSource(), feature=UserEngagementFeature(), 
     store=MemoryStore(),
 )
 
-
 async def main():
-    report = await pipeline.generate(entity_ids=["u1", "u2"])
-    print(report)               # GenerationReport(succeeded=2, failed=0)
+    # All 1 000 reads fire concurrently; failures are isolated per entity
+    report = await pipeline.generate(
+        entity_ids=user_ids, 
+        concurrency=32,
+    )
+    print(report)   # GenerationReport(succeeded=997, failed=3, skipped=0)
 
-    value = await pipeline.retrieve("u1")
-    print(value)                # {"mean_value": 15.0}
+    # Re-run later — already-stored entities are skipped automatically
+    report2 = await pipeline.generate(
+        entity_ids=new_user_ids, 
+        overwrite=False,
+    )
+
+    value = await pipeline.retrieve("u42")
 
 asyncio.run(main())
 ```
+
+See [`examples/basic_usage.py`](examples/basic_usage.py) for a fully runnable version with a simulated async source, bad-data handling, and incremental generation.
 
 ---
 
@@ -197,7 +215,7 @@ uv pip install -e ".[dev]"
 pytest
 ```
 
-99 tests, covering the pipeline, schema, all built-in sources and stores.
+155 tests, covering the pipeline, schema, all built-in sources and stores.
 
 ---
 
@@ -213,7 +231,7 @@ calcine/
 ├── features/          Feature ABC
 └── stores/            FeatureStore ABC + MemoryStore, FileStore, ParquetStore
 
-tests/                 99 tests mirroring the calcine structure
+tests/                 155 tests mirroring the calcine structure
 examples/              5 runnable end-to-end scripts + generated datasets
 docs/                  Architecture, extension guide, schema reference
 ```
