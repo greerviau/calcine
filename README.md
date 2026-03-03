@@ -72,30 +72,32 @@ class UserEngagementFeature(Feature):
 
     async def extract(self, raw: dict, context: dict, entity_id=None) -> dict:
         spend = raw["total_spend"]
-        tier = "low" if spend < 100 else "mid" if spend < 1000 else "high" if spend < 3000 else "whale"
-        return {"spend_tier": tier, "event_rate": raw["event_count"] / raw["days_active"], "total_spend": spend}
+        if spend < 100:    tier = "low"
+        elif spend < 1000: tier = "mid"
+        elif spend < 3000: tier = "high"
+        else:              tier = "whale"
+        return {
+            "spend_tier":  tier,
+            "event_rate":  raw["event_count"] / raw["days_active"],
+            "total_spend": spend,
+        }
 
 
 # --- 3. Build and run ---
 
 pipeline = Pipeline(
-    source=UserDBSource(), feature=UserEngagementFeature(), 
+    source=UserDBSource(),
+    feature=UserEngagementFeature(),
     store=MemoryStore(),
 )
 
 async def main():
     # All 1 000 reads fire concurrently; failures are isolated per entity
-    report = await pipeline.generate(
-        entity_ids=user_ids, 
-        concurrency=32,
-    )
+    report = await pipeline.generate(entity_ids=user_ids, concurrency=32)
     print(report)   # GenerationReport(succeeded=997, failed=3, skipped=0)
 
     # Re-run later — already-stored entities are skipped automatically
-    report2 = await pipeline.generate(
-        entity_ids=new_user_ids, 
-        overwrite=False,
-    )
+    await pipeline.generate(entity_ids=new_user_ids, overwrite=False)
 
     value = await pipeline.retrieve("u42")
 
