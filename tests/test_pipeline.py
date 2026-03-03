@@ -1131,3 +1131,81 @@ def test_retrieve_batch_sync(df):
     results = pipeline.retrieve_batch_sync(["u1", "u2", "u_missing"])
     assert set(results.keys()) == {"u1", "u2"}
     assert "u_missing" not in results
+
+
+# ---------------------------------------------------------------------------
+# partition_context_fn tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_partition_context_fn_visible_in_extract(wide_df):
+    """partition_context_fn result should be visible in Feature.extract."""
+    feature = ContextCaptureFeature()
+    entity_ids = ["u1", "u2", "u3", "u4", "u5", "u6"]
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    # Group odd/even entities into two partitions
+    await pipeline.generate(
+        entity_ids=entity_ids,
+        partition_by=lambda eid: int(eid[1:]) % 2,  # 0 = even, 1 = odd
+        partition_context_fn=lambda key: {"parity": "even" if key == 0 else "odd"},
+    )
+
+    # Odd entity IDs: u1, u3, u5
+    for eid in ["u1", "u3", "u5"]:
+        assert feature.received[eid]["parity"] == "odd"
+    # Even entity IDs: u2, u4, u6
+    for eid in ["u2", "u4", "u6"]:
+        assert feature.received[eid]["parity"] == "even"
+
+
+@pytest.mark.asyncio
+async def test_partition_context_fn_with_explicit_partitions(wide_df):
+    """partition_context_fn should work with explicitly passed partitions."""
+    feature = ContextCaptureFeature()
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    await pipeline.generate(
+        partitions={"alpha": ["u1", "u2"], "beta": ["u3", "u4"]},
+        partition_context_fn=lambda key: {"group": key},
+    )
+
+    assert feature.received["u1"]["group"] == "alpha"
+    assert feature.received["u2"]["group"] == "alpha"
+    assert feature.received["u3"]["group"] == "beta"
+    assert feature.received["u4"]["group"] == "beta"
+
+
+@pytest.mark.asyncio
+async def test_partition_context_fn_shadowed_by_context_fn(wide_df):
+    """context_fn should override partition_context_fn for the same key."""
+    feature = ContextCaptureFeature()
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    await pipeline.generate(
+        partitions={"group_a": ["u1", "u2"]},
+        partition_context_fn=lambda key: {"label": "partition_value"},
+        context_fn=lambda eid: {"label": f"entity_{eid}"},
+    )
+
+    # entity-level context_fn wins over partition_context_fn
+    assert feature.received["u1"]["label"] == "entity_u1"
+    assert feature.received["u2"]["label"] == "entity_u2"
+
+
+@pytest.mark.asyncio
+async def test_partition_context_fn_shared_context_is_base(wide_df):
+    """Shared context is the base; partition_context_fn layers on top."""
+    feature = ContextCaptureFeature()
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    await pipeline.generate(
+        partitions={"p": ["u1"]},
+        context={"shared_key": "shared", "partition_key": "will_be_overridden"},
+        partition_context_fn=lambda key: {"partition_key": key},
+    )
+
+    ctx = feature.received["u1"]
+    assert ctx["shared_key"] == "shared"        # shared context preserved
+    assert ctx["partition_key"] == "p"          # partition_context_fn shadows

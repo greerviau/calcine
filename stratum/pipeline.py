@@ -448,6 +448,7 @@ class Pipeline:
         partitions: dict[str, list[str]] | None = None,
         partition_by: Callable[[str], Hashable] | None = None,
         context_fn: Callable[[str], dict[str, Any]] | None = None,
+        partition_context_fn: Callable[[Hashable], dict[str, Any]] | None = None,
         concurrency: int = 1,
         batch_size: int = 1,
         overwrite: bool = True,
@@ -498,9 +499,22 @@ class Pipeline:
                 ``Feature.extract_batch``.  Defaults to an empty dict.
             context_fn: Optional callable ``(entity_id) -> dict`` that
                 returns per-entity context additions.  The returned dict is
-                merged on top of *context* (``{**context, **context_fn(eid)}``),
-                so entity-specific values shadow shared ones.  For batch
-                extraction, the merged dicts are passed as *entity_contexts*.
+                merged on top of *context* (and any *partition_context_fn*
+                result), so entity-specific values shadow shared ones.  For
+                batch extraction, the merged dicts are passed as
+                *entity_contexts*.
+            partition_context_fn: Optional callable ``(partition_key) -> dict``
+                that returns context additions for every entity in a
+                partition.  The returned dict is merged on top of *context*
+                but below *context_fn* (i.e.
+                ``{**context, **partition_context_fn(key), **context_fn(eid)}``).
+                Useful for injecting partition-specific metadata such as the
+                region name, a shard index, or a partition-level model
+                handle into every extraction call in that partition.  The
+                *partition_key* is whatever value ``partition_by`` returns
+                (or the explicit dict key when *partitions* is used).  In
+                flat entity/batch mode the key is the entity ID or batch
+                start index — typically not useful there.
             partitions: Pre-built partition mapping
                 ``{partition_key: [entity_ids]}``.  Mutually exclusive with
                 *entity_ids*.
@@ -583,13 +597,18 @@ class Pipeline:
         feature_name = type(self.feature).__name__
         semaphore = asyncio.Semaphore(concurrency)
 
-        async def run_partition(entities: list[str]) -> None:
+        async def run_partition(partition_key: Any, entities: list[str]) -> None:
             nonlocal completed
             async with semaphore:
+                partition_ctx = (
+                    {**context, **partition_context_fn(partition_key)}
+                    if partition_context_fn
+                    else context
+                )
                 if batch_size == 1:
                     for entity_id in entities:
                         await self._process_entity(
-                            entity_id, context, context_fn, overwrite, report,
+                            entity_id, partition_ctx, context_fn, overwrite, report,
                             feature_name, store_results, executor,
                         )
                         completed += 1
@@ -607,7 +626,7 @@ class Pipeline:
                         sub_batch = entities[i : i + batch_size]
                         await self._process_batch(
                             sub_batch,
-                            context,
+                            partition_ctx,
                             context_fn,
                             overwrite,
                             report,
@@ -617,7 +636,9 @@ class Pipeline:
                             executor,
                         )
 
-        await asyncio.gather(*[run_partition(entities) for entities in partition_map.values()])
+        await asyncio.gather(
+            *[run_partition(key, entities) for key, entities in partition_map.items()]
+        )
         return report
 
     async def retrieve(self, entity_id: str) -> Any:
