@@ -4,12 +4,139 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Hashable
+from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import Any
 
 from .features.base import Feature
 from .sources.base import DataSource
 from .stores.base import FeatureStore
+
+# ---------------------------------------------------------------------------
+# Module-level executor worker functions
+# ---------------------------------------------------------------------------
+# These must be defined at module level (not as closures) so that
+# ProcessPoolExecutor can pickle them for inter-process dispatch.
+
+
+def _run_entity_in_executor(
+    source: DataSource,
+    feature: Feature,
+    entity_id: str,
+    context: dict[str, Any],
+) -> tuple[Any, list[str]]:
+    """Run one entity's extract pipeline stages in a thread or process.
+
+    Executes: ``source.read`` → ``feature.pre_extract`` → ``feature.extract``
+    → ``feature.post_extract`` → ``feature.validate``.
+
+    Store writes are intentionally excluded so they remain in the main
+    process (preserving correct behaviour for in-memory and async stores).
+
+    Returns:
+        ``(result, errors)`` where *errors* is non-empty on validation
+        failure and empty on success.
+
+    Raises:
+        Any exception propagated from the pipeline stages.  The caller
+        records it as an unhandled pipeline error.
+    """
+
+    async def _work() -> tuple[Any, list[str]]:
+        raw = await source.read(entity_id=entity_id)
+        raw = await feature.pre_extract(raw)
+        result = await feature.extract(raw, context, entity_id=entity_id)
+        result = await feature.post_extract(result)
+        errors = await feature.validate(result)
+        return result, errors
+
+    return asyncio.run(_work())
+
+
+def _run_batch_in_executor(
+    source: DataSource,
+    feature: Feature,
+    entity_ids: list[str],
+    context: dict[str, Any],
+    entity_contexts: list[dict[str, Any]] | None,
+) -> list[tuple[Any, list[str]] | BaseException]:
+    """Run one batch's extract pipeline stages in a thread or process.
+
+    Mirrors the logic of ``Pipeline._process_batch`` steps 2–4
+    (concurrent reads, pre_extract, extract_batch, post_extract, validate).
+    Store writes and report updates are handled by the caller in the main
+    process.
+
+    Returns:
+        One entry per item in *entity_ids*, in order:
+
+        - ``(result, [])`` — success
+        - ``(None, errors_list)`` — validation failure
+        - ``BaseException`` — unhandled error for that entity
+
+    A whole-batch ``extract_batch`` failure is caught and stored as a
+    ``BaseException`` in every valid slot, preserving the same per-entity
+    failure isolation as the non-executor path.
+    """
+
+    async def _work() -> list[tuple[Any, list[str]] | BaseException]:
+        # --- Concurrent reads ---
+        raw_results: list[Any] = await asyncio.gather(
+            *[source.read(entity_id=eid) for eid in entity_ids],
+            return_exceptions=True,
+        )
+
+        results: dict[int, tuple[Any, list[str]] | BaseException] = {}
+        valid_indices: list[int] = []
+        valid_raws: list[Any] = []
+
+        # --- Pre-extract; filter read failures ---
+        for idx, (_eid, raw) in enumerate(zip(entity_ids, raw_results, strict=True)):
+            if isinstance(raw, BaseException):
+                results[idx] = raw
+                continue
+            try:
+                pre = await feature.pre_extract(raw)
+                valid_indices.append(idx)
+                valid_raws.append(pre)
+            except Exception as exc:
+                results[idx] = exc
+
+        if not valid_indices:
+            return [results[i] for i in range(len(entity_ids))]
+
+        valid_ids = [entity_ids[i] for i in valid_indices]
+        valid_entity_ctxs = (
+            [entity_contexts[i] for i in valid_indices]
+            if entity_contexts is not None
+            else None
+        )
+
+        # --- Batch extract ---
+        try:
+            batch_results: list[Any] = await feature.extract_batch(
+                valid_raws, context, entity_ids=valid_ids, entity_contexts=valid_entity_ctxs
+            )
+        except Exception as exc:
+            for idx in valid_indices:
+                results[idx] = exc
+            return [results[i] for i in range(len(entity_ids))]
+
+        # --- Post-extract and validate ---
+        for idx, result in zip(valid_indices, batch_results, strict=True):
+            if isinstance(result, BaseException):
+                results[idx] = result
+                continue
+            try:
+                result = await feature.post_extract(result)
+                errors = await feature.validate(result)
+                results[idx] = (result, errors)
+            except Exception as exc:
+                results[idx] = exc
+
+        return [results[i] for i in range(len(entity_ids))]
+
+    return asyncio.run(_work())
 
 
 @dataclass
@@ -98,6 +225,7 @@ class Pipeline:
         report: GenerationReport,
         feature_name: str,
         store_results: bool,
+        executor: Executor | None,
     ) -> None:
         """Process a single entity and update *report* in place."""
         try:
@@ -106,11 +234,23 @@ class Pipeline:
                 return
 
             entity_ctx = {**context, **context_fn(entity_id)} if context_fn else context
-            raw = await self.source.read(entity_id=entity_id)
-            raw = await self.feature.pre_extract(raw)
-            result = await self.feature.extract(raw, entity_ctx, entity_id=entity_id)
-            result = await self.feature.post_extract(result)
-            errors = await self.feature.validate(result)
+
+            if executor is not None:
+                loop = asyncio.get_running_loop()
+                result, errors = await loop.run_in_executor(
+                    executor,
+                    _run_entity_in_executor,
+                    self.source,
+                    self.feature,
+                    entity_id,
+                    entity_ctx,
+                )
+            else:
+                raw = await self.source.read(entity_id=entity_id)
+                raw = await self.feature.pre_extract(raw)
+                result = await self.feature.extract(raw, entity_ctx, entity_id=entity_id)
+                result = await self.feature.post_extract(result)
+                errors = await self.feature.validate(result)
 
             if errors:
                 report.failed[entity_id] = errors
@@ -135,6 +275,7 @@ class Pipeline:
         feature_name: str,
         on_entity_done: Callable[[], None] | None,
         store_results: bool,
+        executor: Executor | None,
     ) -> None:
         """Process a batch of entities with a single ``extract_batch`` call.
 
@@ -164,6 +305,59 @@ class Pipeline:
             to_process.append(entity_id)
 
         if not to_process:
+            return
+
+        # --- Executor path: steps 2-4 run in thread/process; store.write stays here ---
+        if executor is not None:
+            batch_entity_contexts: list[dict[str, Any]] | None = (
+                [{**context, **context_fn(eid)} for eid in to_process]
+                if context_fn
+                else None
+            )
+            loop = asyncio.get_running_loop()
+            try:
+                slot_results: list[tuple[Any, list[str]] | BaseException] = (
+                    await loop.run_in_executor(
+                        executor,
+                        _run_batch_in_executor,
+                        self.source,
+                        self.feature,
+                        to_process,
+                        context,
+                        batch_entity_contexts,
+                    )
+                )
+            except Exception as exc:
+                for entity_id in to_process:
+                    report.failed[entity_id] = [
+                        f"Unhandled exception in pipeline for feature '{feature_name}', "
+                        f"entity '{entity_id}': {type(exc).__name__}: {exc}"
+                    ]
+                    if on_entity_done is not None:
+                        on_entity_done()
+                return
+
+            for entity_id, slot in zip(to_process, slot_results, strict=True):
+                if isinstance(slot, BaseException):
+                    report.failed[entity_id] = [
+                        f"Unhandled exception in pipeline for feature '{feature_name}', "
+                        f"entity '{entity_id}': {type(slot).__name__}: {slot}"
+                    ]
+                else:
+                    result, errors = slot
+                    if errors:
+                        report.failed[entity_id] = errors
+                    else:
+                        try:
+                            await self.store.write(self.feature, entity_id, result)
+                            report.succeeded[entity_id] = result if store_results else None
+                        except Exception as exc:
+                            report.failed[entity_id] = [
+                                f"Unhandled exception in pipeline for feature '{feature_name}', "
+                                f"entity '{entity_id}': {type(exc).__name__}: {exc}"
+                            ]
+                if on_entity_done is not None:
+                    on_entity_done()
             return
 
         # --- 2. Concurrent reads (return_exceptions preserves per-entity errors) ---
@@ -259,6 +453,7 @@ class Pipeline:
         overwrite: bool = True,
         store_results: bool = True,
         on_progress: Callable[[int, int, GenerationReport], None] | None = None,
+        executor: Executor | None = None,
     ) -> GenerationReport:
         """Extract and store features for a collection of entities.
 
@@ -330,6 +525,17 @@ class Pipeline:
             on_progress: Optional sync callback invoked after each entity
                 resolves (succeeds, fails, or is skipped).  Receives
                 ``(completed: int, total: int, report: GenerationReport)``.
+            executor: Optional ``concurrent.futures.Executor`` (e.g.
+                ``ThreadPoolExecutor`` or ``ProcessPoolExecutor``) to run
+                the extract pipeline stages (read → pre_extract → extract →
+                post_extract → validate) outside the asyncio event loop.
+                Use ``ProcessPoolExecutor`` to bypass the GIL for CPU-bound
+                feature extraction.  ``store.write`` always runs in the
+                main process, so all store implementations (including
+                ``MemoryStore``) work correctly.  When using
+                ``ProcessPoolExecutor``, ``source`` and ``feature`` must be
+                picklable.  Set ``concurrency`` to match the executor's
+                ``max_workers`` so all workers can run concurrently.
 
         Returns:
             ``GenerationReport`` collecting every success, failure, and skip.
@@ -383,7 +589,8 @@ class Pipeline:
                 if batch_size == 1:
                     for entity_id in entities:
                         await self._process_entity(
-                            entity_id, context, context_fn, overwrite, report, feature_name, store_results
+                            entity_id, context, context_fn, overwrite, report,
+                            feature_name, store_results, executor,
                         )
                         completed += 1
                         if on_progress is not None:
@@ -407,6 +614,7 @@ class Pipeline:
                             feature_name,
                             on_entity_done,
                             store_results,
+                            executor,
                         )
 
         await asyncio.gather(*[run_partition(entities) for entities in partition_map.values()])
@@ -446,3 +654,36 @@ class Pipeline:
             except KeyError:
                 pass
         return results
+
+    # ------------------------------------------------------------------
+    # Synchronous convenience wrappers
+    # ------------------------------------------------------------------
+
+    def generate_sync(self, *args: Any, **kwargs: Any) -> GenerationReport:
+        """Blocking version of :meth:`generate` for use outside an async context.
+
+        Equivalent to ``asyncio.run(pipeline.generate(...))``.  All keyword
+        arguments are forwarded to :meth:`generate` unchanged.
+
+        .. note::
+            Raises ``RuntimeError`` if called from inside a running event loop
+            (e.g. Jupyter notebooks or FastAPI handlers).  Use the async
+            :meth:`generate` directly in those contexts.
+        """
+        return asyncio.run(self.generate(*args, **kwargs))
+
+    def retrieve_sync(self, entity_id: str) -> Any:
+        """Blocking version of :meth:`retrieve` for use outside an async context.
+
+        .. note::
+            Raises ``RuntimeError`` if called from inside a running event loop.
+        """
+        return asyncio.run(self.retrieve(entity_id))
+
+    def retrieve_batch_sync(self, entity_ids: list[str]) -> dict[str, Any]:
+        """Blocking version of :meth:`retrieve_batch` for use outside an async context.
+
+        .. note::
+            Raises ``RuntimeError`` if called from inside a running event loop.
+        """
+        return asyncio.run(self.retrieve_batch(entity_ids))

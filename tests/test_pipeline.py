@@ -988,3 +988,146 @@ async def test_context_fn_none_passes_shared_context_to_batch(wide_df):
     await pipeline.generate(entity_ids=entity_ids, context={"shared": 1}, batch_size=3)
 
     assert feature.received_contexts is None
+
+
+# ---------------------------------------------------------------------------
+# executor tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_executor_per_entity_success(df):
+    """executor path should succeed and write values to the store."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        report = await pipeline.generate(
+            entity_ids=["u1", "u2"], executor=pool, concurrency=2
+        )
+
+    assert report.success_count == 2
+    assert report.failure_count == 0
+    # Values must be persisted to the store (write happens in main process)
+    assert await pipeline.retrieve("u1") == {"mean_value": 15.0}
+    assert await pipeline.retrieve("u2") == {"mean_value": 15.0}
+
+
+@pytest.mark.asyncio
+async def test_executor_exception_recorded_as_failure(df):
+    """Exceptions raised inside the executor should appear in report.failed."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    pipeline = Pipeline(
+        source=DataFrameSource(df), feature=FailingFeature(), store=MemoryStore()
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        report = await pipeline.generate(entity_ids=["u1"], executor=pool)
+
+    assert report.failure_count == 1
+    assert "u1" in report.failed
+    assert "RuntimeError" in report.failed["u1"][0]
+
+
+@pytest.mark.asyncio
+async def test_executor_validation_failure_recorded(df):
+    """Schema validation failures from the executor path appear in report.failed."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    class WrongTypeFeature(Feature):
+        schema = FeatureSchema({"mean_value": types.Float64(nullable=False)})
+
+        async def extract(self, raw, context, entity_id=None):
+            return {"mean_value": "not_a_float"}
+
+    pipeline = Pipeline(
+        source=DataFrameSource(df), feature=WrongTypeFeature(), store=MemoryStore()
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        report = await pipeline.generate(entity_ids=["u1"], executor=pool)
+
+    assert report.failure_count == 1
+    assert "u1" in report.failed
+
+
+@pytest.mark.asyncio
+async def test_executor_store_write_in_main_process(df):
+    """store.write must occur in the main process so MemoryStore is populated."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = MemoryStore()
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        await pipeline.generate(entity_ids=["u1", "u2"], executor=pool, concurrency=2)
+
+    # Both reads must be visible in the same MemoryStore instance
+    result = await store.read(MeanFeature(), "u1")
+    assert "mean_value" in result
+
+
+@pytest.mark.asyncio
+async def test_executor_with_batch_size(wide_df):
+    """With batch_size > 1, each batch is dispatched as a single executor call."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    feature = BatchTrackingFeature()
+    entity_ids = [f"u{i}" for i in range(1, 7)]
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        report = await pipeline.generate(
+            entity_ids=entity_ids, batch_size=3, concurrency=2, executor=pool
+        )
+
+    assert report.success_count == 6
+    # Two batches of 3 → extract_batch called twice (once per batch)
+    assert feature.calls == [3, 3]
+
+
+@pytest.mark.asyncio
+async def test_executor_with_concurrency(wide_df):
+    """concurrency > 1 with an executor should process all entities correctly."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    entity_ids = [f"u{i}" for i in range(1, 7)]
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=MeanFeature(), store=MemoryStore())
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        report = await pipeline.generate(entity_ids=entity_ids, executor=pool, concurrency=3)
+
+    assert report.success_count == 6
+    assert report.failure_count == 0
+
+
+# ---------------------------------------------------------------------------
+# sync wrapper tests
+# ---------------------------------------------------------------------------
+
+
+def test_generate_sync_basic(df):
+    """generate_sync should return a GenerationReport and values should be stored."""
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
+    report = pipeline.generate_sync(entity_ids=["u1", "u2"])
+
+    assert isinstance(report, GenerationReport)
+    assert report.success_count == 2
+    assert report.failure_count == 0
+
+
+def test_retrieve_sync(df):
+    """retrieve_sync should return the value previously stored."""
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
+    pipeline.generate_sync(entity_ids=["u1"])
+
+    result = pipeline.retrieve_sync("u1")
+    assert result == {"mean_value": 15.0}
+
+
+def test_retrieve_batch_sync(df):
+    """retrieve_batch_sync should return a dict of stored values."""
+    pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
+    pipeline.generate_sync(entity_ids=["u1", "u2"])
+
+    results = pipeline.retrieve_batch_sync(["u1", "u2", "u_missing"])
+    assert set(results.keys()) == {"u1", "u2"}
+    assert "u_missing" not in results
