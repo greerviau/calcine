@@ -37,6 +37,14 @@ class TestFloat64:
         t = types.Float64(nullable=False, default=0.0)
         assert t.default == 0.0
 
+    def test_nan_is_invalid(self):
+        errors = types.Float64().validate(float("nan"))
+        assert len(errors) > 0
+
+    def test_nan_is_invalid_not_nullable(self):
+        errors = types.Float64(nullable=False).validate(float("nan"))
+        assert len(errors) > 0
+
 
 class TestFloat32:
     def test_valid(self):
@@ -44,6 +52,10 @@ class TestFloat32:
 
     def test_invalid(self):
         assert len(types.Float32().validate({})) > 0
+
+    def test_nan_is_invalid(self):
+        errors = types.Float32().validate(float("nan"))
+        assert len(errors) > 0
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ Usage::
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -63,9 +64,11 @@ class Float32(FeatureType):
 
     def _validate_value(self, value: Any) -> list[str]:
         try:
-            float(value)
+            v = float(value)
         except (TypeError, ValueError):
             return [f"Expected float-compatible value, got {type(value).__name__}"]
+        if math.isnan(v):
+            return ["Value is NaN"]
         return []
 
 
@@ -74,9 +77,11 @@ class Float64(FeatureType):
 
     def _validate_value(self, value: Any) -> list[str]:
         try:
-            float(value)
+            v = float(value)
         except (TypeError, ValueError):
             return [f"Expected float-compatible value, got {type(value).__name__}"]
+        if math.isnan(v):
+            return ["Value is NaN"]
         return []
 
 
