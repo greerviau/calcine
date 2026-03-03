@@ -39,7 +39,7 @@ Priority tiers: **P0** = blocking real use, **P1** = significant gap, **P2** = q
 
 - [ ] **SQLite store** — A `SQLiteStore(path)` that persists features to a single SQLite file keyed by `(feature_name, entity_id)`. Persistent, zero-config, no directory explosion, portable. Better default persistent store than `FileStore` for most use cases.
 
-- [ ] **Fix NaN in Float32/Float64 validation** — `float("nan")` currently passes. Add `allow_nan: bool = False` parameter (default False for new code, keep True as opt-in). This is a correctness bug, not just a limitation.
+- [x] **Fix NaN in Float32/Float64 validation** — `float("nan")` currently passes. Add `allow_nan: bool = False` parameter (default False for new code, keep True as opt-in). This is a correctness bug, not just a limitation.
 
 - [ ] **ParquetStore append optimization** — Current implementation loads the entire Parquet file, modifies a row, and rewrites. Replace with an append-and-deduplicate strategy (or partition by entity) to make writes O(1) rather than O(n).
 
