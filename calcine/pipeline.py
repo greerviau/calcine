@@ -519,15 +519,14 @@ class Pipeline:
             partition_context_fn: Optional callable ``(partition_key) -> dict``
                 that returns context additions for every entity in a
                 partition.  The returned dict is merged on top of *context*
-                but below *context_fn* (i.e.
-                ``{**context, **partition_context_fn(key), **context_fn(eid)}``).
-                Useful for injecting partition-specific metadata such as the
-                region name, a shard index, or a partition-level model
-                handle into every extraction call in that partition.  The
-                *partition_key* is whatever value ``partition_by`` returns
-                (or the explicit dict key when *partitions* is used).  In
-                flat entity/batch mode the key is the entity ID or batch
-                start index — typically not useful there.
+                and ``_partition_key`` but below *context_fn* (i.e.
+                ``{**context, "_partition_key": key, **partition_context_fn(key), **context_fn(eid)}``).
+                Useful for injecting partition-specific metadata such as a
+                DB connection handle or a partition-level model into every
+                extraction call in that partition.  Note: the partition key
+                is always available as ``context["_partition_key"]`` without
+                needing this callback — use it only when you need to derive
+                *additional* values from the key.
             partitions: Pre-built partition mapping
                 ``{partition_key: [entity_ids]}``.  Mutually exclusive with
                 *entity_ids*.
@@ -609,15 +608,19 @@ class Pipeline:
         report = GenerationReport()
         feature_name = type(self.feature).__name__
         semaphore = asyncio.Semaphore(concurrency)
+        # Only inject _partition_key when the caller explicitly grouped entities
+        # into partitions.  In flat entity/batch mode the key is the entity ID
+        # or a batch index, which is not meaningful partition information.
+        has_explicit_partitions = partitions is not None or partition_by is not None
 
         async def run_partition(partition_key: Any, entities: list[str]) -> None:
             nonlocal completed
             async with semaphore:
-                partition_ctx = (
-                    {**context, **partition_context_fn(partition_key)}
-                    if partition_context_fn
-                    else context
-                )
+                partition_ctx = {
+                    **context,
+                    **({"_partition_key": partition_key} if has_explicit_partitions else {}),
+                    **(partition_context_fn(partition_key) if partition_context_fn else {}),
+                }
                 if batch_size == 1:
                     for entity_id in entities:
                         await self._process_entity(

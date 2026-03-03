@@ -1206,6 +1206,51 @@ async def test_partition_context_fn_shared_context_is_base(wide_df):
     assert ctx["partition_key"] == "p"  # partition_context_fn shadows
 
 
+@pytest.mark.asyncio
+async def test_partition_key_injected_with_explicit_partitions(wide_df):
+    """_partition_key should be in context when using explicit partitions."""
+    feature = ContextCaptureFeature()
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    await pipeline.generate(partitions={"shard_a": ["u1", "u2"], "shard_b": ["u3"]})
+
+    assert feature.received["u1"]["_partition_key"] == "shard_a"
+    assert feature.received["u2"]["_partition_key"] == "shard_a"
+    assert feature.received["u3"]["_partition_key"] == "shard_b"
+
+
+@pytest.mark.asyncio
+async def test_partition_key_injected_with_partition_by(wide_df):
+    """_partition_key should be in context when using partition_by."""
+    feature = ContextCaptureFeature()
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    await pipeline.generate(
+        entity_ids=["u1", "u2", "u3"],
+        partition_by=lambda eid: "even" if int(eid[1]) % 2 == 0 else "odd",
+    )
+
+    assert feature.received["u1"]["_partition_key"] == "odd"
+    assert feature.received["u2"]["_partition_key"] == "even"
+    assert feature.received["u3"]["_partition_key"] == "odd"
+
+
+@pytest.mark.asyncio
+async def test_partition_context_fn_can_shadow_partition_key(wide_df):
+    """partition_context_fn values layer on top of _partition_key."""
+    feature = ContextCaptureFeature()
+    pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
+
+    await pipeline.generate(
+        partitions={"p": ["u1"]},
+        partition_context_fn=lambda key: {"extra": f"from_{key}"},
+    )
+
+    ctx = feature.received["u1"]
+    assert ctx["_partition_key"] == "p"
+    assert ctx["extra"] == "from_p"
+
+
 # ---------------------------------------------------------------------------
 # Context forwarding to source.read and store.write
 # ---------------------------------------------------------------------------
@@ -1273,8 +1318,8 @@ async def test_partition_context_forwarded_to_source(df):
         context_fn=lambda eid: {"entity": eid},
     )
 
-    assert source.read_contexts["u1"] == {"base": True, "partition": "group", "entity": "u1"}
-    assert source.read_contexts["u2"] == {"base": True, "partition": "group", "entity": "u2"}
+    assert source.read_contexts["u1"] == {"base": True, "_partition_key": "group", "partition": "group", "entity": "u1"}
+    assert source.read_contexts["u2"] == {"base": True, "_partition_key": "group", "partition": "group", "entity": "u2"}
 
 
 @pytest.mark.asyncio
