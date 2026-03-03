@@ -34,7 +34,7 @@ Quick start::
     value  = await pipeline.retrieve("e1")
 """
 
-from .exceptions import SchemaViolationError, SourceError, StoreError, CalcineError
+from .exceptions import CalcineError, SchemaViolationError, SourceError, StoreError
 from .features.base import Feature
 from .pipeline import GenerationReport, Pipeline
 from .schema import FeatureSchema, types
