@@ -15,7 +15,6 @@ whatever it needs.
 Demonstrates:
   - SourceBundle with mixed source types
   - context for global config that doesn't vary per entity
-  - pre_extract hook to drop columns the Feature doesn't use
   - MemoryStore for prototyping, then swapping to FileStore
 
 Run:
@@ -91,16 +90,9 @@ class UserRiskScore(Feature):
         }
     )
 
-    async def pre_extract(self, raw: dict) -> dict:
-        # Drop columns we never use so extract() stays clean
-        if "helpful_votes" in raw.get("transactions", pd.DataFrame()).columns:
-            raw["transactions"] = raw["transactions"].drop(
-                columns=["helpful_votes", "category", "review"], errors="ignore"
-            )
-        return raw
-
     async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> dict:
         txns = raw["transactions"]  # DataFrame
+        txns = txns.drop(columns=["helpful_votes", "category", "review"], errors="ignore")
         profile = raw["profile"]  # Series (one row)
         limits = raw["limits"]  # dict of thresholds
 

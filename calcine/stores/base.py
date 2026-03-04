@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ..fanout import FanOutResult
     from ..features.base import Feature
 
 
@@ -129,6 +130,55 @@ class FeatureStore(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support delete operations.")
 
+    async def awrite_fanout(
+        self,
+        feature: Feature,
+        entity_id: str,
+        result: FanOutResult,
+        context: dict | None = None,
+    ) -> None:
+        """Persist a fan-out extraction result for a source entity.
+
+        Writes parent metadata under ``entity_id`` and each sub-entity record
+        under its own key.  A sentinel ``{}`` is written when
+        ``result.metadata`` is ``None`` so that ``overwrite=False`` existence
+        checks work correctly for fan-out features without parent metadata.
+
+        Override this in stores that support atomic multi-key writes (e.g. a
+        single SQL transaction).  The default calls :meth:`awrite` sequentially.
+
+        Args:
+            feature: The ``Feature`` instance.
+            entity_id: Source entity identifier (used as the parent store key).
+            result: :class:`~calcine.FanOutResult` from ``Feature.extract_many``.
+            context: Pipeline context dict at write time.
+
+        Raises:
+            StoreError: If any write operation fails.
+        """
+        # Always write parent entry (metadata or tombstone) for overwrite=False support.
+        parent_data = result.metadata if result.metadata is not None else {}
+        await self.awrite(feature, entity_id, parent_data, context=context)
+        for sub_id, record in result.records.items():
+            await self.awrite(feature, sub_id, record, context=context)
+
+    async def alist_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
+        """Return entity IDs stored for a feature, optionally filtered by prefix.
+
+        Args:
+            feature: The ``Feature`` instance.
+            prefix: When given, only entity IDs starting with this string are
+                returned.  Primary use-case is discovering sub-entities produced
+                by fan-out extraction (e.g. ``prefix="recording_001/"``).
+
+        Returns:
+            List of matching entity IDs in arbitrary order.
+
+        Raises:
+            NotImplementedError: If this store does not support entity listing.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support list_entities.")
+
     # ------------------------------------------------------------------
     # Synchronous convenience wrappers
     # ------------------------------------------------------------------
@@ -154,6 +204,20 @@ class FeatureStore(ABC):
     def delete(self, feature: Feature, entity_id: str) -> None:
         """Blocking version of :meth:`adelete` for use outside an async context."""
         return asyncio.run(self.adelete(feature, entity_id))
+
+    def write_fanout(
+        self,
+        feature: Feature,
+        entity_id: str,
+        result: FanOutResult,
+        context: dict | None = None,
+    ) -> None:
+        """Blocking version of :meth:`awrite_fanout` for use outside an async context."""
+        return asyncio.run(self.awrite_fanout(feature, entity_id, result, context))
+
+    def list_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
+        """Blocking version of :meth:`alist_entities` for use outside an async context."""
+        return asyncio.run(self.alist_entities(feature, prefix))
 
     def _feature_key(self, feature: Feature) -> str:
         """Return a stable string namespace key for a feature instance.

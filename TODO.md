@@ -59,66 +59,7 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [ ] **Store bulk read + DataFrame export** — Add `read_many(feature, entity_ids) -> list[Any]` for validated bulk retrieval, and `to_dataframe(feature, entity_ids) -> pd.DataFrame` for ML-ready export with correct dtypes derived from the schema. Both sync by default with `aread_many` / `ato_dataframe` async variants. Without this, the typed contract story only holds for single-entity lookups; training workflows have no clean path through the store. `read_many` also supersedes the existing `retrieve_batch` on `Pipeline`.
 
-- [ ] **Fan-out extraction (`extract_many` + `FanOutResult`)** — Support 1:many extraction where one source entity produces multiple independently-stored sub-entity records. Core use cases: signal processing (file → segments), document processing (file → chunks), session data (log → events).
-
-  **New types:**
-  ```python
-  @dataclass
-  class FanOutResult:
-      records:  dict[str, Any]         # sub_id → value; each validated against schema
-      metadata: dict[str, Any] | None = None  # parent-level data; validated against parent_schema
-  ```
-
-  **Feature changes:**
-  ```python
-  class AudioSegmentFeature(Feature):
-      parent_schema = FeatureSchema({          # optional; validates FanOutResult.metadata
-          "sample_rate": types.Int64(nullable=False),
-          "speaker_id":  types.String(nullable=True),
-      })
-      schema = FeatureSchema({                 # validates each record in FanOutResult.records
-          "mfcc": types.NDArray(shape=(13,), dtype="float32"),
-          "rms":  types.Float64(nullable=False),
-      })
-
-      async def extract_many(
-          self, raw: bytes, context: dict, entity_id: str
-      ) -> FanOutResult:
-          header   = parse_header(raw)
-          segments = segment_audio(raw, window_ms=100)
-          return FanOutResult(
-              metadata={
-                  "sample_rate": header.sample_rate,
-                  "speaker_id":  header.speaker_id,
-              },
-              records={
-                  f"{entity_id}/{i}": {"mfcc": compute_mfcc(s), "rms": compute_rms(s)}
-                  for i, s in enumerate(segments)
-              },
-          )
-  ```
-
-  **Pipeline routing:** the pipeline checks for `extract_many` first. If defined, it takes the fan-out path; otherwise falls back to `extract`. `extract` remains `@abstractmethod` — fan-out features may implement it as `raise NotImplementedError` since the pipeline will never call it when `extract_many` is defined.
-
-  **Store writes:** parent metadata is written under the source `entity_id`; each record is written under its sub-entity key. Stores may optionally override `write_fanout(feature, entity_id, result)` to handle all writes atomically (e.g. in a single SQL transaction). The default implementation calls `write()` for each entry individually.
-
-  **Store key convention:**
-  ```
-  ("AudioSegmentFeature", "recording_001")    ← parent metadata
-  ("AudioSegmentFeature", "recording_001/0")  ← sub-entity
-  ("AudioSegmentFeature", "recording_001/1")
-  ```
-
-  **Retrieval:**
-  ```python
-  store.read(AudioSegmentFeature, "recording_001")           # parent metadata
-  sub_ids = store.list_entities(AudioSegmentFeature, prefix="recording_001/")
-  segments = store.read_many(AudioSegmentFeature, sub_ids)
-  ```
-
-  **`overwrite=False` behaviour:** skip the source entity entirely if its parent `entity_id` already exists in the store. The source is not re-read and no sub-entities are rewritten.
-
-  **`GenerationReport`:** the source entity is the unit of reporting. A source entity is recorded as failed if any sub-entity or parent metadata validation/write fails; sub-entity-level failures are nested under the source entity in `report.failures`.
+- [x] **Fan-out extraction (`extract_many` + `FanOutResult`)** — `FanOutResult(records, metadata)` returned by `Feature.extract_many`; pipeline auto-routes when `extract_many` is overridden; `parent_schema` validates metadata, `schema` validates each record; `MemoryStore` implements `alist_entities(feature, prefix)`; `overwrite=False` checks parent entity_id.
 
 - [ ] **Fault-tolerant SourceBundle** — Add `SourceBundle(..., fault_tolerant: bool = False)`. When enabled, a failing sub-source returns `None` for its key rather than propagating the exception. Lets features degrade gracefully when optional sources are unavailable.
 
@@ -130,7 +71,7 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [ ] **Cross-field schema validation** — Add an optional `validate_record(self, record: dict) -> list[str]` hook to `FeatureSchema` (or `FeatureType`) for constraints that span multiple fields (e.g., `end_time > start_time`).
 
-- [ ] **Simplify Feature API — deprecate `pre_extract` / `post_extract`** — These lifecycle hooks add cognitive overhead for minimal gain; users put this logic in `extract`. Deprecate them and document `extract` as the single transformation point. Reduces the framework's apparent surface area and the feeling that calcine is imposing structure for its own sake.
+- [x] **Simplify Feature API — removed `pre_extract` / `post_extract`** — Lifecycle hooks removed; `extract` is the single transformation point.
 
 - [ ] **Demote built-in sources to examples/extras** — `FileSource`, `DirectorySource`, `HTTPSource`, and `DataFrameSource` are thin wrappers that create a false impression of completeness. Move them to a `calcine.contrib` subpackage or clearly document them as reference implementations, not production components. The `DataSource` ABC is the product; the built-ins are scaffolding.
 

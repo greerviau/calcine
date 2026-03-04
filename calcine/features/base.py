@@ -3,25 +3,29 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..schema import FeatureSchema
+
+if TYPE_CHECKING:
+    from ..fanout import FanOutResult
 
 
 class Feature(ABC):
     """Contract for all feature extractors in the calcine pipeline.
 
     A ``Feature`` transforms raw data (from a ``DataSource``) into a
-    structured, typed feature value.  The full extraction lifecycle is::
+    structured, typed feature value.
 
-        raw → pre_extract(raw) → extract(preprocessed, context)
-            → post_extract(result) → validate(result)
-
-    Subclasses must implement ``extract``.  All other methods have
-    sensible pass-through defaults.
+    Subclasses must implement :meth:`extract`.  :meth:`validate` runs
+    automatically after extraction if ``schema`` is set.
 
     The ``schema`` class attribute, if set to a ``FeatureSchema``, enables
     automatic validation of the extracted result.
+
+    For 1:many fan-out extraction (one source entity → many stored sub-entity
+    records), override :meth:`extract_many` instead of ``extract`` and
+    optionally set ``parent_schema`` for parent-level metadata validation.
 
     Example::
 
@@ -30,9 +34,26 @@ class Feature(ABC):
 
             async def extract(self, raw: str, context: dict) -> dict:
                 return {"vec": encode(raw)}
+
+    Fan-out example::
+
+        class SegmentFeature(Feature):
+            parent_schema = FeatureSchema({"duration_s": types.Float64(nullable=False)})
+            schema = FeatureSchema({"rms": types.Float64(nullable=False)})
+
+            async def extract_many(self, raw, context, entity_id) -> FanOutResult:
+                segments = split(raw)
+                return FanOutResult(
+                    metadata={"duration_s": len(raw) / SR},
+                    records={f"{entity_id}/{i}": {"rms": rms(s)} for i, s in enumerate(segments)},
+                )
+
+            async def extract(self, raw, context, entity_id=None):
+                raise NotImplementedError  # pipeline uses extract_many
     """
 
     schema: ClassVar[FeatureSchema | None] = None
+    parent_schema: ClassVar[FeatureSchema | None] = None
 
     @abstractmethod
     async def extract(self, raw: Any, context: dict, entity_id: str | None = None) -> Any:
@@ -52,33 +73,36 @@ class Feature(ABC):
         """
         ...
 
-    async def pre_extract(self, raw: Any) -> Any:
-        """Pre-processing hook executed before ``extract``.
+    async def extract_many(self, raw: Any, context: dict, entity_id: str) -> FanOutResult:
+        """Fan-out extraction: one source entity → many stored sub-entity records.
 
-        Override to normalise or filter raw data before the main extraction
-        logic.  The default is a pass-through.
+        Override this instead of :meth:`extract` when a single source entity
+        produces multiple independently-stored sub-entity records (e.g. audio
+        file → segments, document → chunks, session log → events).
+
+        When this method is overridden, the pipeline routes through the fan-out
+        path and never calls :meth:`extract`.  Fan-out features may implement
+        ``extract`` as ``raise NotImplementedError``.
 
         Args:
             raw: Raw data from the source.
+            context: Pipeline context dict.
+            entity_id: The source entity identifier.  Use this to build
+                sub-entity IDs (e.g. ``f"{entity_id}/{i}"``).
 
         Returns:
-            Pre-processed data passed to ``extract``.
+            :class:`~calcine.FanOutResult` with ``records`` (sub-entity ID →
+            value, each validated against ``schema``) and optional ``metadata``
+            (validated against ``parent_schema``).
+
+        Raises:
+            NotImplementedError: Base implementation — override to enable
+                fan-out extraction.
         """
-        return raw
-
-    async def post_extract(self, result: Any) -> Any:
-        """Post-processing hook executed after ``extract``.
-
-        Override to round, clip, cast, or otherwise transform the raw
-        extraction output.  The default is a pass-through.
-
-        Args:
-            result: Value returned by ``extract``.
-
-        Returns:
-            Post-processed result written to the store and validated.
-        """
-        return result
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement extract_many. "
+            "Override extract_many to enable fan-out extraction."
+        )
 
     async def extract_batch(
         self,
@@ -101,8 +125,7 @@ class Feature(ABC):
         those entities as failed and continue.
 
         Args:
-            raws: Pre-processed raw data for each entity in the batch
-                (already passed through ``pre_extract``).
+            raws: Raw data for each entity in the batch.
             context: Shared context dict forwarded from ``generate()``.
             entity_ids: Entity identifiers corresponding to each item in
                 *raws*, in the same order.  ``None`` when called outside

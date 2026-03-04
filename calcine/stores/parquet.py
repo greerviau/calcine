@@ -57,7 +57,9 @@ class ParquetStore(FeatureStore):
                 "Install with: pip install calcine[parquet]"
             ) from exc
 
-    async def awrite(self, feature: Feature, entity_id: str, data: Any, context: dict | None = None) -> None:
+    async def awrite(
+        self, feature: Feature, entity_id: str, data: Any, context: dict | None = None
+    ) -> None:
         self._check_deps()
         import pandas as pd
 

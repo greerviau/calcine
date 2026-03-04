@@ -34,6 +34,7 @@ Quick start::
 """
 
 from .exceptions import CalcineError, SchemaViolationError, SourceError, StoreError
+from .fanout import FanOutResult
 from .features.base import Feature
 from .pipeline import GenerationReport, Pipeline
 from .schema import FeatureSchema, types
@@ -47,6 +48,8 @@ __all__ = [
     # Pipeline
     "Pipeline",
     "GenerationReport",
+    # Fan-out
+    "FanOutResult",
     # ABCs
     "Feature",
     "DataSource",

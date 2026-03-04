@@ -80,9 +80,10 @@ async def demo_nan() -> None:
     print(f"  u_ghost (no rows): in succeeded={ghost_result is not None}, value={ghost_result}")
     print()
 
-    print("  MITIGATION — reject NaN/Inf in post_extract:\n")
+    print("  MITIGATION — reject NaN/Inf at the end of extract():\n")
     print(
-        "    async def post_extract(self, result):\n"
+        "    async def extract(self, raw, context, entity_id=None):\n"
+        "        result = {'score': float(raw['amount'].mean())}\n"
         "        for k, v in result.items():\n"
         "            if isinstance(v, float) and not math.isfinite(v):\n"
         "                raise ValueError(f'Non-finite value for {k!r}: {v}')\n"
@@ -95,9 +96,7 @@ async def demo_nan() -> None:
         async def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
         ) -> dict:
-            return {"score": float(raw["amount"].mean())}
-
-        async def post_extract(self, result: dict) -> dict:
+            result = {"score": float(raw["amount"].mean())}
             for k, v in result.items():
                 if isinstance(v, float) and not math.isfinite(v):
                     raise ValueError(f"Non-finite value for {k!r}: {v!r}")

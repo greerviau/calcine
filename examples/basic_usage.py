@@ -33,16 +33,16 @@ from calcine.stores import MemoryStore
 # The key point: each entity's data is fetched independently and asynchronously.
 
 _USER_DB: dict[str, dict[str, Any]] = {
-    "u01": {"total_spend": 1240.50, "event_count": 87,  "days_active": 120},
-    "u02": {"total_spend": 89.99,   "event_count": 12,  "days_active": 14},
+    "u01": {"total_spend": 1240.50, "event_count": 87, "days_active": 120},
+    "u02": {"total_spend": 89.99, "event_count": 12, "days_active": 14},
     "u03": {"total_spend": 4320.00, "event_count": 412, "days_active": 365},
-    "u04": {"total_spend": 0.0,     "event_count": 0,   "days_active": 1},
-    "u05": {"total_spend": 760.10,  "event_count": 55,  "days_active": 60},
-    "u06": {"total_spend": None,    "event_count": 31,  "days_active": 30},  # bad data
+    "u04": {"total_spend": 0.0, "event_count": 0, "days_active": 1},
+    "u05": {"total_spend": 760.10, "event_count": 55, "days_active": 60},
+    "u06": {"total_spend": None, "event_count": 31, "days_active": 30},  # bad data
     "u07": {"total_spend": 2100.00, "event_count": 190, "days_active": 200},
-    "u08": {"total_spend": 330.00,  "event_count": 28,  "days_active": 45},
-    "u09": {"total_spend": 980.00,  "event_count": 72,  "days_active": 90},
-    "u10": {"total_spend": 15.00,   "event_count": 3,   "days_active": 5},
+    "u08": {"total_spend": 330.00, "event_count": 28, "days_active": 45},
+    "u09": {"total_spend": 980.00, "event_count": 72, "days_active": 90},
+    "u10": {"total_spend": 15.00, "event_count": 3, "days_active": 5},
     # u11 and u12 have no DB record at all → source raises KeyError
 }
 
@@ -67,11 +67,13 @@ _SPEND_TIERS = ["low", "mid", "high", "whale"]
 class UserEngagementFeature(Feature):
     """Derive validated engagement metrics from raw user activity data."""
 
-    schema = FeatureSchema({
-        "spend_tier":  types.Category(categories=_SPEND_TIERS, nullable=False),
-        "event_rate":  types.Float64(nullable=False),   # events per active day
-        "total_spend": types.Float64(nullable=False),
-    })
+    schema = FeatureSchema(
+        {
+            "spend_tier": types.Category(categories=_SPEND_TIERS, nullable=False),
+            "event_rate": types.Float64(nullable=False),  # events per active day
+            "total_spend": types.Float64(nullable=False),
+        }
+    )
 
     async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> dict:
         spend = raw["total_spend"]
@@ -90,8 +92,8 @@ class UserEngagementFeature(Feature):
             tier = "whale"
 
         return {
-            "spend_tier":  tier,
-            "event_rate":  round(event_rate, 4),
+            "spend_tier": tier,
+            "event_rate": round(event_rate, 4),
             "total_spend": spend,
         }
 
@@ -129,7 +131,7 @@ async def main() -> None:
         overwrite=False,
     )
     print(report2)
-    print(f"  skipped   : {sorted(report2.skipped)}")   # already in store
+    print(f"  skipped   : {sorted(report2.skipped)}")  # already in store
     print(f"  succeeded : {sorted(report2.succeeded)}")  # newly processed
     print(f"  failed    : {dict(report2.failed)}")
     # u01-u05, u07-u08 skipped; u09-u10 succeed; u06, u11, u12 fail

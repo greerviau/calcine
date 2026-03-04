@@ -11,7 +11,7 @@ Demonstrates:
   - NDArray schema with shape and dtype enforcement
   - FileStore + NumpySerializer for compact array persistence
   - Single-field schema (the whole feature value is the array, not a dict)
-  - post_extract hook: L2-normalise the vector after extraction
+  - L2-normalisation inside extract()
 
 Run:
     python examples/02_embeddings.py
@@ -107,10 +107,7 @@ class DocumentEmbedding(Feature):
     )
 
     async def extract(self, raw: str, context: dict, entity_id: str | None = None) -> np.ndarray:
-        return _trigram_embed(raw)
-
-    async def post_extract(self, result: np.ndarray) -> np.ndarray:
-        """L2-normalise the vector."""
+        result = _trigram_embed(raw)
         norm = float(np.linalg.norm(result))
         if norm > 0:
             result = (result / norm).astype(np.float32)

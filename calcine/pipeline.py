@@ -8,6 +8,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import Any
 
+from .fanout import FanOutResult
 from .features.base import Feature
 from .sources.base import DataSource
 from .stores.base import FeatureStore
@@ -27,8 +28,7 @@ def _run_entity_in_executor(
 ) -> tuple[Any, list[str]]:
     """Run one entity's extract pipeline stages in a thread or process.
 
-    Executes: ``source.read`` → ``feature.pre_extract`` → ``feature.extract``
-    → ``feature.post_extract`` → ``feature.validate``.
+    Executes: ``source.read`` → ``feature.extract`` → ``feature.validate``.
 
     Store writes are intentionally excluded so they remain in the main
     process (preserving correct behaviour for in-memory and async stores).
@@ -44,9 +44,7 @@ def _run_entity_in_executor(
 
     async def _work() -> tuple[Any, list[str]]:
         raw = await source.read(entity_id=entity_id, context=context)
-        raw = await feature.pre_extract(raw)
         result = await feature.extract(raw, context, entity_id=entity_id)
-        result = await feature.post_extract(result)
         errors = await feature.validate(result)
         return result, errors
 
@@ -63,7 +61,7 @@ def _run_batch_in_executor(
     """Run one batch's extract pipeline stages in a thread or process.
 
     Mirrors the logic of ``Pipeline._process_batch`` steps 2–4
-    (concurrent reads, pre_extract, extract_batch, post_extract, validate).
+    (concurrent reads, extract_batch, validate).
     Store writes and report updates are handled by the caller in the main
     process.
 
@@ -96,17 +94,13 @@ def _run_batch_in_executor(
         valid_indices: list[int] = []
         valid_raws: list[Any] = []
 
-        # --- Pre-extract; filter read failures ---
+        # --- Filter read failures ---
         for idx, (_eid, raw) in enumerate(zip(entity_ids, raw_results, strict=True)):
             if isinstance(raw, BaseException):
                 results[idx] = raw
                 continue
-            try:
-                pre = await feature.pre_extract(raw)
-                valid_indices.append(idx)
-                valid_raws.append(pre)
-            except Exception as exc:
-                results[idx] = exc
+            valid_indices.append(idx)
+            valid_raws.append(raw)
 
         if not valid_indices:
             return [results[i] for i in range(len(entity_ids))]
@@ -126,13 +120,12 @@ def _run_batch_in_executor(
                 results[idx] = exc
             return [results[i] for i in range(len(entity_ids))]
 
-        # --- Post-extract and validate ---
+        # --- Validate ---
         for idx, result in zip(valid_indices, batch_results, strict=True):
             if isinstance(result, BaseException):
                 results[idx] = result
                 continue
             try:
-                result = await feature.post_extract(result)
                 errors = await feature.validate(result)
                 results[idx] = (result, errors)
             except Exception as exc:
@@ -220,6 +213,63 @@ class Pipeline:
         self.feature = feature
         self.store = store
 
+    async def _process_fanout_entity(
+        self,
+        entity_id: str,
+        context: dict[str, Any],
+        context_fn: Callable[[str], dict[str, Any]] | None,
+        overwrite: bool,
+        report: GenerationReport,
+        feature_name: str,
+        store_results: bool,
+    ) -> None:
+        """Process a single fan-out entity and update *report* in place.
+
+        Fan-out entities produce multiple sub-entity records from one source
+        read.  The parent ``entity_id`` is used as the overwrite-check key and
+        as the store key for ``FanOutResult.metadata``.
+        """
+        try:
+            if not overwrite and await self.store.aexists(self.feature, entity_id):
+                report.skipped.add(entity_id)
+                return
+
+            entity_ctx = {**context, **context_fn(entity_id)} if context_fn else context
+
+            raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
+            fan_out_result: FanOutResult = await self.feature.extract_many(
+                raw, entity_ctx, entity_id
+            )
+
+            # Validate parent metadata
+            if self.feature.parent_schema is not None and fan_out_result.metadata is not None:
+                meta_errors = self.feature.parent_schema.validate(fan_out_result.metadata)
+                if meta_errors:
+                    report.failed[entity_id] = meta_errors
+                    return
+
+            # Validate each sub-entity record
+            all_errors: list[str] = []
+            for sub_id, record in fan_out_result.records.items():
+                sub_errors = await self.feature.validate(record)
+                for e in sub_errors:
+                    all_errors.append(f"sub-entity '{sub_id}': {e}")
+
+            if all_errors:
+                report.failed[entity_id] = all_errors
+                return
+
+            await self.store.awrite_fanout(
+                self.feature, entity_id, fan_out_result, context=entity_ctx
+            )
+            report.succeeded[entity_id] = fan_out_result if store_results else None
+
+        except Exception as exc:
+            report.failed[entity_id] = [
+                f"Unhandled exception in pipeline for feature '{feature_name}', "
+                f"entity '{entity_id}': {type(exc).__name__}: {exc}"
+            ]
+
     async def _process_entity(
         self,
         entity_id: str,
@@ -232,6 +282,13 @@ class Pipeline:
         executor: Executor | None,
     ) -> None:
         """Process a single entity and update *report* in place."""
+        # Fan-out path: delegate when the feature overrides extract_many
+        if type(self.feature).extract_many is not Feature.extract_many:
+            await self._process_fanout_entity(
+                entity_id, context, context_fn, overwrite, report, feature_name, store_results
+            )
+            return
+
         try:
             if not overwrite and await self.store.aexists(self.feature, entity_id):
                 report.skipped.add(entity_id)
@@ -251,9 +308,7 @@ class Pipeline:
                 )
             else:
                 raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
-                raw = await self.feature.pre_extract(raw)
                 result = await self.feature.extract(raw, entity_ctx, entity_id=entity_id)
-                result = await self.feature.post_extract(result)
                 errors = await self.feature.validate(result)
 
             if errors:
@@ -369,8 +424,7 @@ class Pipeline:
 
         # --- 2. Per-entity contexts (needed by both read and extract_batch) ---
         entity_ctxs: dict[str, dict[str, Any]] = {
-            eid: {**context, **context_fn(eid)} if context_fn else context
-            for eid in to_process
+            eid: {**context, **context_fn(eid)} if context_fn else context for eid in to_process
         }
 
         # --- 3. Concurrent reads (return_exceptions preserves per-entity errors) ---
@@ -379,7 +433,7 @@ class Pipeline:
             return_exceptions=True,
         )
 
-        # --- 4. Pre-extract per entity; exclude read failures ---
+        # --- 4. Filter read failures ---
         valid_ids: list[str] = []
         valid_raws: list[Any] = []
 
@@ -392,17 +446,8 @@ class Pipeline:
                 if on_entity_done is not None:
                     on_entity_done()
                 continue
-            try:
-                pre = await self.feature.pre_extract(raw)
-                valid_ids.append(entity_id)
-                valid_raws.append(pre)
-            except Exception as exc:
-                report.failed[entity_id] = [
-                    f"Unhandled exception in pipeline for feature '{feature_name}', "
-                    f"entity '{entity_id}': {type(exc).__name__}: {exc}"
-                ]
-                if on_entity_done is not None:
-                    on_entity_done()
+            valid_ids.append(entity_id)
+            valid_raws.append(raw)
 
         if not valid_ids:
             return
@@ -413,7 +458,10 @@ class Pipeline:
         )
         try:
             batch_results: list[Any] = await self.feature.extract_batch(
-                valid_raws, context, entity_ids=valid_ids, entity_contexts=entity_contexts
+                valid_raws,
+                context,
+                entity_ids=valid_ids,
+                entity_contexts=entity_contexts,
             )
         except Exception as exc:
             # Whole-batch failure: attribute to every entity in this batch.
@@ -426,7 +474,7 @@ class Pipeline:
                     on_entity_done()
             return
 
-        # --- 6. Post-extract, validate, write — per entity ---
+        # --- 6. Validate and write — per entity ---
         for entity_id, result in zip(valid_ids, batch_results, strict=True):
             if isinstance(result, BaseException):
                 report.failed[entity_id] = [
@@ -435,7 +483,6 @@ class Pipeline:
                 ]
             else:
                 try:
-                    result = await self.feature.post_extract(result)
                     errors = await self.feature.validate(result)
                     if errors:
                         report.failed[entity_id] = errors
@@ -553,8 +600,8 @@ class Pipeline:
                 ``(completed: int, total: int, report: GenerationReport)``.
             executor: Optional ``concurrent.futures.Executor`` (e.g.
                 ``ThreadPoolExecutor`` or ``ProcessPoolExecutor``) to run
-                the extract pipeline stages (read → pre_extract → extract →
-                post_extract → validate) outside the asyncio event loop.
+                the extract pipeline stages (read → extract → validate)
+                outside the asyncio event loop.
                 Use ``ProcessPoolExecutor`` to bypass the GIL for CPU-bound
                 feature extraction.  ``store.write`` always runs in the
                 main process, so all store implementations (including

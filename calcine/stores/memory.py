@@ -30,7 +30,9 @@ class MemoryStore(FeatureStore):
         # Structure: {feature_name: {entity_id: data}}
         self._data: dict[str, dict[str, Any]] = {}
 
-    async def awrite(self, feature: Feature, entity_id: str, data: Any, context: dict | None = None) -> None:
+    async def awrite(
+        self, feature: Feature, entity_id: str, data: Any, context: dict | None = None
+    ) -> None:
         key = self._feature_key(feature)
         if key not in self._data:
             self._data[key] = {}
@@ -53,6 +55,15 @@ class MemoryStore(FeatureStore):
             del self._data[key][entity_id]
         except KeyError:
             raise KeyError(f"No data for feature '{key}', entity '{entity_id}'") from None
+
+    async def alist_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
+        key = self._feature_key(feature)
+        if key not in self._data:
+            return []
+        entities = list(self._data[key].keys())
+        if prefix is not None:
+            entities = [e for e in entities if e.startswith(prefix)]
+        return entities
 
     def __repr__(self) -> str:  # pragma: no cover
         sizes = {k: len(v) for k, v in self._data.items()}

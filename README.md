@@ -26,6 +26,9 @@ backend, with no lock-in on format or framework.
   combine DataFrames, files, HTTP, or anything custom
 - **Batteries included** — file, DataFrame, and HTTP sources out of the box;
   memory, file, and Parquet stores; pluggable serializers
+- **Fan-out extraction** — `extract_many` produces multiple sub-entity records
+  from one source read; parent metadata and sub-entities are stored independently
+  and discovered via `store.list_entities(feature, prefix="…")`
 - **Never crashes on partial failure** — `generate()` captures every per-entity
   error in a `GenerationReport`; valid entities are always written
 - **No required pandas** — the core only needs `numpy`; pandas is optional
@@ -136,6 +139,49 @@ No assumptions are made about what the sources represent or how they relate.
 
 ---
 
+## Fan-out extraction
+
+When one source entity produces multiple independently-stored sub-entity records
+(audio → segments, document → chunks, session → events), override `extract_many`
+instead of `extract`:
+
+```python
+from calcine import FanOutResult
+
+class AudioSegmentFeature(Feature):
+    parent_schema = FeatureSchema({
+        "sample_rate": types.Int64(nullable=False),
+        "speaker_id":  types.String(nullable=True),
+    })
+    schema = FeatureSchema({
+        "rms": types.Float64(nullable=False),
+    })
+
+    async def extract_many(self, raw: bytes, context: dict, entity_id: str) -> FanOutResult:
+        segments = split_audio(raw)
+        return FanOutResult(
+            metadata={"sample_rate": 16000, "speaker_id": "alice"},
+            records={f"{entity_id}/{i}": {"rms": rms(s)} for i, s in enumerate(segments)},
+        )
+
+    async def extract(self, raw, context, entity_id=None):
+        raise NotImplementedError  # pipeline always uses extract_many
+
+
+report = pipeline.generate(entity_ids=recording_ids)
+
+# Retrieve parent metadata and sub-entity records
+meta     = store.read(feature, "recording_001")
+sub_ids  = store.list_entities(feature, prefix="recording_001/")
+segments = [store.read(feature, sid) for sid in sub_ids]
+```
+
+The pipeline auto-routes to fan-out when `extract_many` is overridden. Parent
+metadata and sub-entity records are stored under separate keys; `overwrite=False`
+skips the source entity if its parent key already exists.
+
+---
+
 ## Schema system
 
 ```python
@@ -213,7 +259,7 @@ uv pip install -e ".[dev]"
 pytest
 ```
 
-165 tests, covering the pipeline, schema, all built-in sources and stores.
+185 tests, covering the pipeline, schema, fan-out extraction, all built-in sources and stores.
 
 ---
 
@@ -222,14 +268,15 @@ pytest
 ```
 calcine/
 ├── pipeline.py        Pipeline + GenerationReport
+├── fanout.py          FanOutResult
 ├── schema.py          FeatureSchema + type system
 ├── serializers.py     Serializer ABC + Pickle / JSON / Numpy
 ├── exceptions.py      SourceError, StoreError, SchemaViolationError
 ├── sources/           DataSource ABC + FileSource, DataFrameSource, HTTPSource, SourceBundle
-├── features/          Feature ABC
+├── features/          Feature ABC (extract + extract_many)
 └── stores/            FeatureStore ABC + MemoryStore, FileStore, ParquetStore
 
-tests/                 165 tests mirroring the calcine structure
+tests/                 185 tests mirroring the calcine structure
 examples/              5 runnable end-to-end scripts + generated datasets
 docs/                  Architecture, extension guide, schema reference
 ```

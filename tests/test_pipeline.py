@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -31,23 +32,6 @@ class MeanFeature(Feature):
 class FailingFeature(Feature):
     async def extract(self, raw, context, entity_id=None):
         raise RuntimeError("Intentional extraction failure")
-
-
-class HookTrackingFeature(Feature):
-    def __init__(self) -> None:
-        self.pre_called = False
-        self.post_called = False
-
-    async def pre_extract(self, raw):
-        self.pre_called = True
-        return raw
-
-    async def extract(self, raw, context, entity_id=None):
-        return {"value": 42.0}
-
-    async def post_extract(self, result):
-        self.post_called = True
-        return result
 
 
 class SlowFeature(Feature):
@@ -190,19 +174,6 @@ async def test_generate_context_forwarded_to_extract(df):
 
     assert received == ctx
 
-
-@pytest.mark.asyncio
-async def test_generate_hooks_called(df):
-    feature = HookTrackingFeature()
-    pipeline = Pipeline(
-        source=DataFrameSource(df),
-        feature=feature,
-        store=MemoryStore(),
-    )
-    await pipeline.agenerate(entity_ids=["u1"])
-
-    assert feature.pre_called
-    assert feature.post_called
 
 
 # ---------------------------------------------------------------------------
@@ -1263,7 +1234,9 @@ class ContextCapturingSource(DataSource):
         self._df = df
         self.read_contexts: dict[str, Any] = {}
 
-    async def read(self, entity_id: str | None = None, context: dict | None = None, **kwargs: Any) -> pd.DataFrame:
+    async def read(
+        self, entity_id: str | None = None, context: dict | None = None, **kwargs: Any
+    ) -> pd.DataFrame:
         self.read_contexts[entity_id] = context
         return self._df[self._df["entity_id"] == entity_id]
 
@@ -1275,7 +1248,9 @@ class ContextCapturingStore(MemoryStore):
         super().__init__()
         self.write_contexts: dict[str, Any] = {}
 
-    async def awrite(self, feature: Any, entity_id: str, data: Any, context: dict | None = None) -> None:
+    async def awrite(
+        self, feature: Any, entity_id: str, data: Any, context: dict | None = None
+    ) -> None:
         self.write_contexts[entity_id] = context
         await super().awrite(feature, entity_id, data)
 
@@ -1318,8 +1293,18 @@ async def test_partition_context_forwarded_to_source(df):
         context_fn=lambda eid: {"entity": eid},
     )
 
-    assert source.read_contexts["u1"] == {"base": True, "_partition_key": "group", "partition": "group", "entity": "u1"}
-    assert source.read_contexts["u2"] == {"base": True, "_partition_key": "group", "partition": "group", "entity": "u2"}
+    assert source.read_contexts["u1"] == {
+        "base": True,
+        "_partition_key": "group",
+        "partition": "group",
+        "entity": "u1",
+    }
+    assert source.read_contexts["u2"] == {
+        "base": True,
+        "_partition_key": "group",
+        "partition": "group",
+        "entity": "u2",
+    }
 
 
 @pytest.mark.asyncio
