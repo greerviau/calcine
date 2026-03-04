@@ -75,7 +75,7 @@ async def demo_nan() -> None:
         store=MemoryStore(),
     )
     # u_ghost has no rows → mean() returns NaN → schema passes → stored silently
-    report = await pipeline.generate(entity_ids=["u1", "u_ghost"])
+    report = await pipeline.agenerate(entity_ids=["u1", "u_ghost"])
     ghost_result = report.succeeded.get("u_ghost")
     print(f"  u_ghost (no rows): in succeeded={ghost_result is not None}, value={ghost_result}")
     print()
@@ -198,7 +198,7 @@ async def demo_bundle_partial_failure() -> None:
         feature=BundleFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1", "u2"])
+    report = await pipeline.agenerate(entity_ids=["u1", "u2"])
     print(f"  u1 (both sources OK) → succeeded: {'u1' in report.succeeded}")
     print(f"  u2 (flaky failed)    → failed:    {'u2' in report.failed}")
     print(f"  Error: {report.failed.get('u2', [''])[0][:80]}")
@@ -248,10 +248,10 @@ async def demo_name_collision() -> None:
     feat_b = _EngagementScore_B()
 
     store = MemoryStore()
-    await store.write(feat_a, "e1", {"v": "team_A_value"})
-    await store.write(feat_b, "e1", {"v": "team_B_value"})  # silently overwrites!
+    await store.awrite(feat_a, "e1", {"v": "team_A_value"})
+    await store.awrite(feat_b, "e1", {"v": "team_B_value"})  # silently overwrites!
 
-    result = await store.read(feat_a, "e1")
+    result = await store.aread(feat_a, "e1")
     print("  Wrote team_A then team_B for entity 'e1'.")
     print(f"  Reading via feat_a → {result}  (expected team_A, got team_B)")
     print(f"\n  Both classes share __name__='{store._feature_key(feat_a)}' — same store key.")
@@ -292,10 +292,10 @@ async def demo_name_collision() -> None:
             return {"v": "team_B_value"}
 
     safe_store = ModuleAwareStore()
-    await safe_store.write(TeamAScore(), "e1", {"v": "team_A_value"})
-    await safe_store.write(TeamBScore(), "e1", {"v": "team_B_value"})
-    result_a = await safe_store.read(TeamAScore(), "e1")
-    result_b = await safe_store.read(TeamBScore(), "e1")
+    await safe_store.awrite(TeamAScore(), "e1", {"v": "team_A_value"})
+    await safe_store.awrite(TeamBScore(), "e1", {"v": "team_B_value"})
+    result_a = await safe_store.aread(TeamAScore(), "e1")
+    result_b = await safe_store.aread(TeamBScore(), "e1")
     print(f"  After mitigation → TeamA: {result_a}  TeamB: {result_b}")
 
 
@@ -314,10 +314,10 @@ async def demo_serial_processing() -> None:
         "  generate() now supports built-in concurrency:\n"
         "\n"
         "    # Flat: up to 20 entities concurrently\n"
-        "    await pipeline.generate(entity_ids=ids, concurrency=20)\n"
+        "    await pipeline.agenerate(entity_ids=ids, concurrency=20)\n"
         "\n"
         "    # Partitioned: serial within region, concurrent across regions\n"
-        "    await pipeline.generate(\n"
+        "    await pipeline.agenerate(\n"
         "        entity_ids=ids,\n"
         "        partition_by=lambda eid: eid.split('_')[0],\n"
         "        concurrency=8,\n"
@@ -338,11 +338,11 @@ async def demo_serial_processing() -> None:
     pipeline = Pipeline(DataFrameSource(df), IoFeature(), MemoryStore())
 
     t0 = time.perf_counter()
-    await pipeline.generate(entity_ids=entity_ids)
+    await pipeline.agenerate(entity_ids=entity_ids)
     t_seq = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    await pipeline.generate(entity_ids=entity_ids, concurrency=20)
+    await pipeline.agenerate(entity_ids=entity_ids, concurrency=20)
     t_conc = time.perf_counter() - t0
 
     print(f"  Serial  ({N} entities × 5ms):      {t_seq:.2f}s")

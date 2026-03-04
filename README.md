@@ -19,7 +19,7 @@ backend, with no lock-in on format or framework.
 
 ## Highlights
 
-- **Fully async** — all I/O is `async`; plays nicely with any async application
+- **Sync-first interface** — `pipeline.generate()` and `store.read()` are plain synchronous calls by default; async variants (`agenerate`, `aread`, …) are opt-in for callers already in an async context
 - **Type-safe schemas** — validate floats, ints, strings, booleans, categoricals,
   ndarrays, and bytes before anything hits the store
 - **Composable sources** — `SourceBundle` fans out to multiple sources concurrently;
@@ -46,7 +46,6 @@ pip install "calcine[dev]"           # + test/lint tools
 ## Quick start
 
 ```python
-import asyncio
 from calcine import Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
@@ -91,17 +90,14 @@ pipeline = Pipeline(
     store=MemoryStore(),
 )
 
-async def main():
-    # All 1 000 reads fire concurrently; failures are isolated per entity
-    report = await pipeline.generate(entity_ids=user_ids, concurrency=32)
-    print(report)   # GenerationReport(succeeded=997, failed=3, skipped=0)
+# All 1 000 reads fire concurrently; failures are isolated per entity
+report = pipeline.generate(entity_ids=user_ids, concurrency=32)
+print(report)   # GenerationReport(succeeded=997, failed=3, skipped=0)
 
-    # Re-run later — already-stored entities are skipped automatically
-    await pipeline.generate(entity_ids=new_user_ids, overwrite=False)
+# Re-run later — already-stored entities are skipped automatically
+pipeline.generate(entity_ids=new_user_ids, overwrite=False)
 
-    value = await pipeline.retrieve("u42")
-
-asyncio.run(main())
+value = pipeline.retrieve("u42")
 ```
 
 See [`examples/basic_usage.py`](examples/basic_usage.py) for a fully runnable version with a simulated async source, bad-data handling, and incremental generation.
@@ -217,7 +213,7 @@ uv pip install -e ".[dev]"
 pytest
 ```
 
-155 tests, covering the pipeline, schema, all built-in sources and stores.
+165 tests, covering the pipeline, schema, all built-in sources and stores.
 
 ---
 
@@ -233,7 +229,7 @@ calcine/
 ├── features/          Feature ABC
 └── stores/            FeatureStore ABC + MemoryStore, FileStore, ParquetStore
 
-tests/                 155 tests mirroring the calcine structure
+tests/                 165 tests mirroring the calcine structure
 examples/              5 runnable end-to-end scripts + generated datasets
 docs/                  Architecture, extension guide, schema reference
 ```

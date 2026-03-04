@@ -141,7 +141,7 @@ async def main() -> None:
 
     print(f"Generating embeddings for {len(entity_ids)} entities …")
     t0 = time.perf_counter()
-    report = await pipeline.generate(entity_ids=entity_ids)
+    report = await pipeline.agenerate(entity_ids=entity_ids)
     elapsed = time.perf_counter() - t0
 
     print(
@@ -150,7 +150,7 @@ async def main() -> None:
 
     # Retrieve and compute pairwise cosine similarities for a small sample
     sample_ids = entity_ids[:5]
-    embeddings = await pipeline.retrieve_batch(sample_ids)
+    embeddings = await pipeline.aretrieve_batch(sample_ids)
 
     # Stored value is a raw ndarray (not a dict)
     print("\nCosine similarity matrix (first 5 docs):")

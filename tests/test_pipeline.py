@@ -87,7 +87,7 @@ async def test_generate_returns_report(df):
         feature=MeanFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1", "u2"])
+    report = await pipeline.agenerate(entity_ids=["u1", "u2"])
 
     assert isinstance(report, GenerationReport)
     assert report.success_count == 2
@@ -101,7 +101,7 @@ async def test_generate_correct_values(df):
         feature=MeanFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1", "u2"])
+    report = await pipeline.agenerate(entity_ids=["u1", "u2"])
 
     # u1 has rows [10, 20] → mean 15; u2 has [15] → mean 15
     assert report.succeeded["u1"]["mean_value"] == 15.0
@@ -116,7 +116,7 @@ async def test_generate_never_raises_on_entity_failure(df):
         feature=FailingFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1", "u2"])
+    report = await pipeline.agenerate(entity_ids=["u1", "u2"])
 
     assert report.failure_count == 2
     assert report.success_count == 0
@@ -132,7 +132,7 @@ async def test_generate_missing_entity_does_not_crash(df):
         feature=MeanFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1", "u_missing"])
+    report = await pipeline.agenerate(entity_ids=["u1", "u_missing"])
 
     assert "u1" in report.succeeded
     assert "u_missing" in report.failed
@@ -153,7 +153,7 @@ async def test_generate_schema_violation_captured_as_failure(df):
         feature=BadFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1"])
+    report = await pipeline.agenerate(entity_ids=["u1"])
 
     assert "u1" in report.failed
     assert len(report.failed["u1"]) > 0
@@ -167,7 +167,7 @@ async def test_generate_default_context_is_empty(df):
         feature=MeanFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(entity_ids=["u1"])
+    report = await pipeline.agenerate(entity_ids=["u1"])
     assert "u1" in report.succeeded
 
 
@@ -186,7 +186,7 @@ async def test_generate_context_forwarded_to_extract(df):
         store=MemoryStore(),
     )
     ctx = {"version": "v2", "ts": 999}
-    await pipeline.generate(entity_ids=["u1"], context=ctx)
+    await pipeline.agenerate(entity_ids=["u1"], context=ctx)
 
     assert received == ctx
 
@@ -199,7 +199,7 @@ async def test_generate_hooks_called(df):
         feature=feature,
         store=MemoryStore(),
     )
-    await pipeline.generate(entity_ids=["u1"])
+    await pipeline.agenerate(entity_ids=["u1"])
 
     assert feature.pre_called
     assert feature.post_called
@@ -219,7 +219,7 @@ async def test_generate_flat_concurrency_correct_results(wide_df):
         store=MemoryStore(),
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, concurrency=3)
+    report = await pipeline.agenerate(entity_ids=ids, concurrency=3)
 
     assert report.success_count == 6
     assert report.failure_count == 0
@@ -236,7 +236,7 @@ async def test_generate_flat_concurrency_full_parallelism(wide_df):
         store=MemoryStore(),
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, concurrency=100)
+    report = await pipeline.agenerate(entity_ids=ids, concurrency=100)
 
     assert report.success_count == 6
 
@@ -256,7 +256,7 @@ async def test_generate_partition_by_correct_results(wide_df):
     )
     ids = [f"u{i}" for i in range(1, 7)]
     # Partition into two groups: odd vs even entity number
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=ids,
         partition_by=lambda eid: int(eid[1:]) % 2,
         concurrency=2,
@@ -281,7 +281,7 @@ async def test_generate_partition_by_groups_entities():
         store=MemoryStore(),
     )
     ids = [f"a_{i}" for i in range(3)] + [f"b_{i}" for i in range(3)]
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=ids,
         partition_by=lambda eid: eid.split("_")[0],
         concurrency=2,
@@ -321,7 +321,7 @@ async def test_generate_serial_within_partition():
         store=MemoryStore(),
     )
     ids = [f"p0_e{i}" for i in range(3)] + [f"p1_e{i}" for i in range(3)]
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=ids,
         partition_by=lambda eid: eid.split("_")[0],
         concurrency=2,
@@ -345,7 +345,7 @@ async def test_generate_explicit_partitions_correct_results(wide_df):
         feature=MeanFeature(),
         store=MemoryStore(),
     )
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         partitions={
             "group_a": ["u1", "u2", "u3"],
             "group_b": ["u4", "u5", "u6"],
@@ -377,7 +377,7 @@ async def test_generate_explicit_partitions_serial_within_group():
         feature=RecordFeature(),
         store=MemoryStore(),
     )
-    await pipeline.generate(
+    await pipeline.agenerate(
         partitions={"only": ["u1", "u2", "u3", "u4", "u5", "u6"]},
         concurrency=1,
     )
@@ -397,10 +397,10 @@ async def test_generate_overwrite_false_skips_existing(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
 
     # First run: populate u1
-    await pipeline.generate(entity_ids=["u1"])
+    await pipeline.agenerate(entity_ids=["u1"])
 
     # Second run: u1 should be skipped, u2 should be processed
-    report = await pipeline.generate(entity_ids=["u1", "u2"], overwrite=False)
+    report = await pipeline.agenerate(entity_ids=["u1", "u2"], overwrite=False)
 
     assert "u1" in report.skipped
     assert "u2" in report.succeeded
@@ -415,10 +415,10 @@ async def test_generate_overwrite_true_reprocesses(df):
     store = MemoryStore()
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
 
-    await pipeline.generate(entity_ids=["u1"])
+    await pipeline.agenerate(entity_ids=["u1"])
 
     # Overwrite with same data — should succeed, not skip
-    report = await pipeline.generate(entity_ids=["u1"], overwrite=True)
+    report = await pipeline.agenerate(entity_ids=["u1"], overwrite=True)
 
     assert report.success_count == 1
     assert report.skip_count == 0
@@ -429,10 +429,10 @@ async def test_generate_overwrite_false_progress_includes_skips(df):
     """on_progress should be called for skipped entities too."""
     store = MemoryStore()
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
-    await pipeline.generate(entity_ids=["u1", "u2"])
+    await pipeline.agenerate(entity_ids=["u1", "u2"])
 
     calls: list[tuple[int, int]] = []
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=["u1", "u2"],
         overwrite=False,
         on_progress=lambda c, t, _: calls.append((c, t)),
@@ -452,7 +452,7 @@ async def test_generate_overwrite_false_progress_includes_skips(df):
 async def test_generate_store_results_false_values_are_none(df):
     """store_results=False: succeeded keys exist but values are None."""
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
-    report = await pipeline.generate(entity_ids=["u1", "u2"], store_results=False)
+    report = await pipeline.agenerate(entity_ids=["u1", "u2"], store_results=False)
 
     assert report.success_count == 2
     assert "u1" in report.succeeded
@@ -466,9 +466,9 @@ async def test_generate_store_results_false_values_still_written_to_store(df):
     """store_results=False does not affect what gets written to the store."""
     store = MemoryStore()
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
-    await pipeline.generate(entity_ids=["u1"], store_results=False)
+    await pipeline.agenerate(entity_ids=["u1"], store_results=False)
 
-    value = await pipeline.retrieve("u1")
+    value = await pipeline.aretrieve("u1")
     assert value["mean_value"] == 15.0
 
 
@@ -476,7 +476,7 @@ async def test_generate_store_results_false_values_still_written_to_store(df):
 async def test_generate_store_results_false_failures_still_recorded(df):
     """Failures are recorded normally even when store_results=False."""
     pipeline = Pipeline(source=DataFrameSource(df), feature=FailingFeature(), store=MemoryStore())
-    report = await pipeline.generate(entity_ids=["u1"], store_results=False)
+    report = await pipeline.agenerate(entity_ids=["u1"], store_results=False)
 
     assert report.failure_count == 1
     assert "u1" in report.failed
@@ -491,7 +491,7 @@ async def test_generate_store_results_false_with_batch_size(wide_df):
         store=MemoryStore(),
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=3, store_results=False)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=3, store_results=False)
 
     assert report.success_count == 6
     assert all(v is None for v in report.succeeded.values())
@@ -508,7 +508,7 @@ async def test_generate_on_progress_call_count(df):
     calls: list[tuple[int, int]] = []
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1", "u2"],
         on_progress=lambda c, t, _: calls.append((c, t)),
     )
@@ -524,7 +524,7 @@ async def test_generate_on_progress_total_matches_entity_count(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=MeanFeature(), store=MemoryStore())
     ids = [f"u{i}" for i in range(1, 7)]
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=ids,
         on_progress=lambda c, t, _: totals.append(t),
     )
@@ -538,7 +538,7 @@ async def test_generate_on_progress_receives_live_report(df):
     snapshots: list[int] = []
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1", "u2"],
         on_progress=lambda c, t, r: snapshots.append(
             r.success_count + r.failure_count + r.skip_count
@@ -555,7 +555,7 @@ async def test_generate_on_progress_with_partitions(wide_df):
     calls: list[int] = []
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=MeanFeature(), store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         partitions={"g0": ["u1", "u2", "u3"], "g1": ["u4", "u5", "u6"]},
         concurrency=2,
         on_progress=lambda c, t, _: calls.append(c),
@@ -574,21 +574,21 @@ async def test_generate_on_progress_with_partitions(wide_df):
 async def test_generate_raises_if_both_entity_ids_and_partitions(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     with pytest.raises(ValueError, match="entity_ids.*partitions|partitions.*entity_ids"):
-        await pipeline.generate(entity_ids=["u1"], partitions={"p": ["u1"]})
+        await pipeline.agenerate(entity_ids=["u1"], partitions={"p": ["u1"]})
 
 
 @pytest.mark.asyncio
 async def test_generate_raises_if_neither_entity_ids_nor_partitions(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     with pytest.raises(ValueError):
-        await pipeline.generate()
+        await pipeline.agenerate()
 
 
 @pytest.mark.asyncio
 async def test_generate_raises_if_partition_by_with_partitions(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     with pytest.raises(ValueError, match="partition_by"):
-        await pipeline.generate(
+        await pipeline.agenerate(
             partitions={"p": ["u1"]},
             partition_by=lambda e: e,
         )
@@ -598,14 +598,14 @@ async def test_generate_raises_if_partition_by_with_partitions(df):
 async def test_generate_raises_if_concurrency_less_than_one(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     with pytest.raises(ValueError, match="concurrency"):
-        await pipeline.generate(entity_ids=["u1"], concurrency=0)
+        await pipeline.agenerate(entity_ids=["u1"], concurrency=0)
 
 
 @pytest.mark.asyncio
 async def test_generate_raises_if_batch_size_less_than_one(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     with pytest.raises(ValueError, match="batch_size"):
-        await pipeline.generate(entity_ids=["u1"], batch_size=0)
+        await pipeline.agenerate(entity_ids=["u1"], batch_size=0)
 
 
 # ---------------------------------------------------------------------------
@@ -660,7 +660,7 @@ async def test_batch_extract_called_once_per_batch(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=3)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=3)
 
     assert report.success_count == 6
     # 6 entities / batch_size 3 → 2 calls
@@ -677,7 +677,7 @@ async def test_batch_extract_correct_results(wide_df):
         store=MemoryStore(),
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=6)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=6)
 
     assert report.success_count == 6
     assert report.failure_count == 0
@@ -692,7 +692,7 @@ async def test_batch_extract_partial_failure_isolated(wide_df):
         store=MemoryStore(),
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=6)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=6)
 
     # Items at index 0, 2, 4 succeed; 1, 3, 5 fail
     assert report.success_count == 3
@@ -708,7 +708,7 @@ async def test_batch_extract_whole_batch_failure(wide_df):
         store=MemoryStore(),
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=6)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=6)
 
     assert report.success_count == 0
     assert report.failure_count == 6
@@ -720,10 +720,10 @@ async def test_batch_extract_default_falls_back_to_extract(df):
     # MeanFeature only implements extract(), so extract_batch uses the default
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
 
-    r_individual = await pipeline.generate(entity_ids=["u1", "u2"])
+    r_individual = await pipeline.agenerate(entity_ids=["u1", "u2"])
     store2 = MemoryStore()
     pipeline2 = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store2)
-    r_batch = await pipeline2.generate(entity_ids=["u1", "u2"], batch_size=2)
+    r_batch = await pipeline2.agenerate(entity_ids=["u1", "u2"], batch_size=2)
 
     assert r_individual.succeeded["u1"] == r_batch.succeeded["u1"]
     assert r_individual.succeeded["u2"] == r_batch.succeeded["u2"]
@@ -734,7 +734,7 @@ async def test_batch_extract_default_per_item_failure_isolated(df):
     """Default extract_batch wraps individual failures — other items still succeed."""
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     # u_missing will fail; u1 should still succeed
-    report = await pipeline.generate(entity_ids=["u1", "u_missing"], batch_size=2)
+    report = await pipeline.agenerate(entity_ids=["u1", "u_missing"], batch_size=2)
 
     assert "u1" in report.succeeded
     assert "u_missing" in report.failed
@@ -747,7 +747,7 @@ async def test_batch_size_with_concurrency(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=2, concurrency=3)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=2, concurrency=3)
 
     assert report.success_count == 6
     # 6 entities / batch_size 2 → 3 batches, each called once
@@ -761,10 +761,10 @@ async def test_batch_size_with_overwrite_false(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=MeanFeature(), store=store)
 
     # Pre-populate u1, u2
-    await pipeline.generate(entity_ids=["u1", "u2"])
+    await pipeline.agenerate(entity_ids=["u1", "u2"])
 
     ids = [f"u{i}" for i in range(1, 7)]
-    report = await pipeline.generate(entity_ids=ids, batch_size=3, overwrite=False)
+    report = await pipeline.agenerate(entity_ids=ids, batch_size=3, overwrite=False)
 
     assert report.skip_count == 2
     assert report.success_count == 4
@@ -778,7 +778,7 @@ async def test_batch_size_on_progress_fires_per_entity(wide_df):
         source=DataFrameSource(wide_df), feature=BatchTrackingFeature(), store=MemoryStore()
     )
     ids = [f"u{i}" for i in range(1, 7)]
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=ids,
         batch_size=3,
         on_progress=lambda c, t, _: calls.append(c),
@@ -796,7 +796,7 @@ async def test_batch_size_with_partition_by(wide_df):
 
     ids = [f"u{i}" for i in range(1, 7)]
     # 2 partitions (odd/even), 3 entities each, batch_size=2 → 2 sub-batches per partition
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=ids,
         partition_by=lambda eid: int(eid[1:]) % 2,
         concurrency=2,
@@ -821,9 +821,9 @@ async def test_retrieve_after_generate(df):
         feature=MeanFeature(),
         store=store,
     )
-    await pipeline.generate(entity_ids=["u1"])
+    await pipeline.agenerate(entity_ids=["u1"])
 
-    result = await pipeline.retrieve("u1")
+    result = await pipeline.aretrieve("u1")
     assert result["mean_value"] == 15.0
 
 
@@ -835,7 +835,7 @@ async def test_retrieve_missing_raises_key_error(df):
         store=MemoryStore(),
     )
     with pytest.raises(KeyError):
-        await pipeline.retrieve("nonexistent")
+        await pipeline.aretrieve("nonexistent")
 
 
 @pytest.mark.asyncio
@@ -845,9 +845,9 @@ async def test_retrieve_batch(df):
         feature=MeanFeature(),
         store=MemoryStore(),
     )
-    await pipeline.generate(entity_ids=["u1", "u2"])
+    await pipeline.agenerate(entity_ids=["u1", "u2"])
 
-    results = await pipeline.retrieve_batch(["u1", "u2", "u_none"])
+    results = await pipeline.aretrieve_batch(["u1", "u2", "u_none"])
     assert "u1" in results
     assert "u2" in results
     assert "u_none" not in results  # missing silently omitted
@@ -918,7 +918,7 @@ async def test_context_fn_per_entity_context_received(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=feature, store=MemoryStore())
 
     labels = {"u1": "premium", "u2": "standard"}
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1", "u2"],
         context={"shared": True},
         context_fn=lambda eid: {"tier": labels[eid]},
@@ -934,7 +934,7 @@ async def test_context_fn_overrides_shared_context(df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1", "u2"],
         context={"key": "shared_value"},
         context_fn=lambda eid: {"key": f"entity_{eid}"},
@@ -950,7 +950,7 @@ async def test_context_fn_without_shared_context(df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1"],
         context_fn=lambda eid: {"entity_label": eid.upper()},
     )
@@ -965,7 +965,7 @@ async def test_context_fn_with_batch_size_passes_entity_contexts(wide_df):
     entity_ids = [f"e{i}" for i in range(4)]
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=entity_ids,
         context={"shared": 1},
         context_fn=lambda eid: {"label": eid},
@@ -986,7 +986,7 @@ async def test_context_fn_none_passes_shared_context_to_batch(wide_df):
     entity_ids = [f"e{i}" for i in range(3)]
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(entity_ids=entity_ids, context={"shared": 1}, batch_size=3)
+    await pipeline.agenerate(entity_ids=entity_ids, context={"shared": 1}, batch_size=3)
 
     assert feature.received_contexts is None
 
@@ -1003,13 +1003,13 @@ async def test_executor_per_entity_success(df):
 
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
     with ThreadPoolExecutor(max_workers=2) as pool:
-        report = await pipeline.generate(entity_ids=["u1", "u2"], executor=pool, concurrency=2)
+        report = await pipeline.agenerate(entity_ids=["u1", "u2"], executor=pool, concurrency=2)
 
     assert report.success_count == 2
     assert report.failure_count == 0
     # Values must be persisted to the store (write happens in main process)
-    assert await pipeline.retrieve("u1") == {"mean_value": 15.0}
-    assert await pipeline.retrieve("u2") == {"mean_value": 15.0}
+    assert await pipeline.aretrieve("u1") == {"mean_value": 15.0}
+    assert await pipeline.aretrieve("u2") == {"mean_value": 15.0}
 
 
 @pytest.mark.asyncio
@@ -1019,7 +1019,7 @@ async def test_executor_exception_recorded_as_failure(df):
 
     pipeline = Pipeline(source=DataFrameSource(df), feature=FailingFeature(), store=MemoryStore())
     with ThreadPoolExecutor(max_workers=2) as pool:
-        report = await pipeline.generate(entity_ids=["u1"], executor=pool)
+        report = await pipeline.agenerate(entity_ids=["u1"], executor=pool)
 
     assert report.failure_count == 1
     assert "u1" in report.failed
@@ -1039,7 +1039,7 @@ async def test_executor_validation_failure_recorded(df):
 
     pipeline = Pipeline(source=DataFrameSource(df), feature=WrongTypeFeature(), store=MemoryStore())
     with ThreadPoolExecutor(max_workers=1) as pool:
-        report = await pipeline.generate(entity_ids=["u1"], executor=pool)
+        report = await pipeline.agenerate(entity_ids=["u1"], executor=pool)
 
     assert report.failure_count == 1
     assert "u1" in report.failed
@@ -1053,10 +1053,10 @@ async def test_executor_store_write_in_main_process(df):
     store = MemoryStore()
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        await pipeline.generate(entity_ids=["u1", "u2"], executor=pool, concurrency=2)
+        await pipeline.agenerate(entity_ids=["u1", "u2"], executor=pool, concurrency=2)
 
     # Both reads must be visible in the same MemoryStore instance
-    result = await store.read(MeanFeature(), "u1")
+    result = await store.aread(MeanFeature(), "u1")
     assert "mean_value" in result
 
 
@@ -1070,7 +1070,7 @@ async def test_executor_with_batch_size(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        report = await pipeline.generate(
+        report = await pipeline.agenerate(
             entity_ids=entity_ids, batch_size=3, concurrency=2, executor=pool
         )
 
@@ -1088,7 +1088,7 @@ async def test_executor_with_concurrency(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=MeanFeature(), store=MemoryStore())
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        report = await pipeline.generate(entity_ids=entity_ids, executor=pool, concurrency=3)
+        report = await pipeline.agenerate(entity_ids=entity_ids, executor=pool, concurrency=3)
 
     assert report.success_count == 6
     assert report.failure_count == 0
@@ -1102,7 +1102,7 @@ async def test_executor_with_concurrency(wide_df):
 def test_generate_sync_basic(df):
     """generate_sync should return a GenerationReport and values should be stored."""
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
-    report = pipeline.generate_sync(entity_ids=["u1", "u2"])
+    report = pipeline.generate(entity_ids=["u1", "u2"])
 
     assert isinstance(report, GenerationReport)
     assert report.success_count == 2
@@ -1112,18 +1112,18 @@ def test_generate_sync_basic(df):
 def test_retrieve_sync(df):
     """retrieve_sync should return the value previously stored."""
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
-    pipeline.generate_sync(entity_ids=["u1"])
+    pipeline.generate(entity_ids=["u1"])
 
-    result = pipeline.retrieve_sync("u1")
+    result = pipeline.retrieve("u1")
     assert result == {"mean_value": 15.0}
 
 
 def test_retrieve_batch_sync(df):
     """retrieve_batch_sync should return a dict of stored values."""
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=MemoryStore())
-    pipeline.generate_sync(entity_ids=["u1", "u2"])
+    pipeline.generate(entity_ids=["u1", "u2"])
 
-    results = pipeline.retrieve_batch_sync(["u1", "u2", "u_missing"])
+    results = pipeline.retrieve_batch(["u1", "u2", "u_missing"])
     assert set(results.keys()) == {"u1", "u2"}
     assert "u_missing" not in results
 
@@ -1141,7 +1141,7 @@ async def test_partition_context_fn_visible_in_extract(wide_df):
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
     # Group odd/even entities into two partitions
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=entity_ids,
         partition_by=lambda eid: int(eid[1:]) % 2,  # 0 = even, 1 = odd
         partition_context_fn=lambda key: {"parity": "even" if key == 0 else "odd"},
@@ -1161,7 +1161,7 @@ async def test_partition_context_fn_with_explicit_partitions(wide_df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         partitions={"alpha": ["u1", "u2"], "beta": ["u3", "u4"]},
         partition_context_fn=lambda key: {"group": key},
     )
@@ -1178,7 +1178,7 @@ async def test_partition_context_fn_shadowed_by_context_fn(wide_df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         partitions={"group_a": ["u1", "u2"]},
         partition_context_fn=lambda key: {"label": "partition_value"},
         context_fn=lambda eid: {"label": f"entity_{eid}"},
@@ -1195,7 +1195,7 @@ async def test_partition_context_fn_shared_context_is_base(wide_df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         partitions={"p": ["u1"]},
         context={"shared_key": "shared", "partition_key": "will_be_overridden"},
         partition_context_fn=lambda key: {"partition_key": key},
@@ -1212,7 +1212,7 @@ async def test_partition_key_injected_with_explicit_partitions(wide_df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(partitions={"shard_a": ["u1", "u2"], "shard_b": ["u3"]})
+    await pipeline.agenerate(partitions={"shard_a": ["u1", "u2"], "shard_b": ["u3"]})
 
     assert feature.received["u1"]["_partition_key"] == "shard_a"
     assert feature.received["u2"]["_partition_key"] == "shard_a"
@@ -1225,7 +1225,7 @@ async def test_partition_key_injected_with_partition_by(wide_df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1", "u2", "u3"],
         partition_by=lambda eid: "even" if int(eid[1]) % 2 == 0 else "odd",
     )
@@ -1241,7 +1241,7 @@ async def test_partition_context_fn_can_shadow_partition_key(wide_df):
     feature = ContextCaptureFeature()
     pipeline = Pipeline(source=DataFrameSource(wide_df), feature=feature, store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         partitions={"p": ["u1"]},
         partition_context_fn=lambda key: {"extra": f"from_{key}"},
     )
@@ -1275,9 +1275,9 @@ class ContextCapturingStore(MemoryStore):
         super().__init__()
         self.write_contexts: dict[str, Any] = {}
 
-    async def write(self, feature: Any, entity_id: str, data: Any, context: dict | None = None) -> None:
+    async def awrite(self, feature: Any, entity_id: str, data: Any, context: dict | None = None) -> None:
         self.write_contexts[entity_id] = context
-        await super().write(feature, entity_id, data)
+        await super().awrite(feature, entity_id, data)
 
 
 @pytest.mark.asyncio
@@ -1286,7 +1286,7 @@ async def test_context_forwarded_to_source_read(df):
     pipeline = Pipeline(source=source, feature=MeanFeature(), store=MemoryStore())
 
     ctx = {"region": "us-east", "env": "prod"}
-    await pipeline.generate(entity_ids=["u1", "u2"], context=ctx)
+    await pipeline.agenerate(entity_ids=["u1", "u2"], context=ctx)
 
     assert source.read_contexts["u1"] == ctx
     assert source.read_contexts["u2"] == ctx
@@ -1298,7 +1298,7 @@ async def test_context_forwarded_to_store_write(df):
     pipeline = Pipeline(source=DataFrameSource(df), feature=MeanFeature(), store=store)
 
     ctx = {"region": "us-east"}
-    await pipeline.generate(entity_ids=["u1", "u2"], context=ctx)
+    await pipeline.agenerate(entity_ids=["u1", "u2"], context=ctx)
 
     assert store.write_contexts["u1"] == ctx
     assert store.write_contexts["u2"] == ctx
@@ -1310,7 +1310,7 @@ async def test_partition_context_forwarded_to_source(df):
     source = ContextCapturingSource(df)
     pipeline = Pipeline(source=source, feature=MeanFeature(), store=MemoryStore())
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=["u1", "u2"],
         context={"base": True},
         partition_by=lambda eid: "group",
@@ -1330,7 +1330,7 @@ async def test_context_forwarded_to_source_and_store_in_batch_mode(df):
     pipeline = Pipeline(source=source, feature=MeanFeature(), store=store)
 
     ctx = {"batch": True}
-    await pipeline.generate(entity_ids=["u1", "u2"], context=ctx, batch_size=2)
+    await pipeline.agenerate(entity_ids=["u1", "u2"], context=ctx, batch_size=2)
 
     assert source.read_contexts["u1"] == ctx
     assert source.read_contexts["u2"] == ctx

@@ -112,7 +112,7 @@ pipeline = Pipeline(
 async def main() -> None:
     # --- Run 1: first 8 users, 8 concurrent reads ----------------------------
     print("=== Run 1: first 8 users (concurrency=8) ===")
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=ALL_USERS[:8],
         concurrency=8,
     )
@@ -123,7 +123,7 @@ async def main() -> None:
 
     # --- Run 2: all 12 users, skip already-stored ----------------------------
     print("\n=== Run 2: all 12 users, overwrite=False ===")
-    report2 = await pipeline.generate(
+    report2 = await pipeline.agenerate(
         entity_ids=ALL_USERS,
         concurrency=8,
         overwrite=False,
@@ -136,7 +136,7 @@ async def main() -> None:
 
     # --- Retrieve results ----------------------------------------------------
     print("\n=== Retrieving stored features ===")
-    batch = await pipeline.retrieve_batch(["u01", "u03", "u07", "u09"])
+    batch = await pipeline.aretrieve_batch(["u01", "u03", "u07", "u09"])
     for uid, feat in batch.items():
         print(f"  {uid}: {feat}")
 

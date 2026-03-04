@@ -162,7 +162,7 @@ async def run(
 ) -> float:
     pipeline = Pipeline(source=VectorSource(), feature=feature, store=MemoryStore())
     t0 = time.perf_counter()
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=ALL_IDS,
         batch_size=batch_size,
         concurrency=concurrency,

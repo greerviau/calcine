@@ -92,7 +92,7 @@ async def main() -> None:
 
     print(f"\nRunning pipeline for {len(entity_ids):,} entities …")
     t0 = time.perf_counter()
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=entity_ids,
         context={"run_id": "example-01", "schema_version": "v1"},
     )
@@ -108,13 +108,13 @@ async def main() -> None:
 
     # Spot-check a feature
     sample_id = entity_ids[0]
-    feature = await pipeline.retrieve(sample_id)
+    feature = await pipeline.aretrieve(sample_id)
     print(f"\nSample  ({sample_id}):")
     for k, v in feature.items():
         print(f"  {k:<22} {v}")
 
     # Demonstrate batch retrieval
-    batch = await pipeline.retrieve_batch(entity_ids[:5])
+    batch = await pipeline.aretrieve_batch(entity_ids[:5])
     print(f"\nBatch retrieved {len(batch)} entities — avg ratings:")
     for eid, feat in batch.items():
         print(f"  {eid}  avg_rating={feat['avg_rating']:.2f}")

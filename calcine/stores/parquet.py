@@ -35,8 +35,8 @@ class ParquetStore(FeatureStore):
     Example::
 
         store = ParquetStore("/data/feature_store")
-        await store.write(feature, "u1", {"mean_value": 15.0, "count": 2})
-        record = await store.read(feature, "u1")
+        store.write(feature, "u1", {"mean_value": 15.0, "count": 2})
+        record = store.read(feature, "u1")
         # {"mean_value": 15.0, "count": 2}
     """
 
@@ -57,7 +57,7 @@ class ParquetStore(FeatureStore):
                 "Install with: pip install calcine[parquet]"
             ) from exc
 
-    async def write(self, feature: Feature, entity_id: str, data: Any, context: dict | None = None) -> None:
+    async def awrite(self, feature: Feature, entity_id: str, data: Any, context: dict | None = None) -> None:
         self._check_deps()
         import pandas as pd
 
@@ -93,7 +93,7 @@ class ParquetStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def read(self, feature: Feature, entity_id: str) -> Any:
+    async def aread(self, feature: Feature, entity_id: str) -> Any:
         self._check_deps()
 
         path = self._feature_path(feature)
@@ -127,7 +127,7 @@ class ParquetStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def exists(self, feature: Feature, entity_id: str) -> bool:
+    async def aexists(self, feature: Feature, entity_id: str) -> bool:
         self._check_deps()
 
         path = self._feature_path(feature)
@@ -144,7 +144,7 @@ class ParquetStore(FeatureStore):
 
         return await loop.run_in_executor(None, _check)
 
-    async def delete(self, feature: Feature, entity_id: str) -> None:
+    async def adelete(self, feature: Feature, entity_id: str) -> None:
         self._check_deps()
 
         path = self._feature_path(feature)

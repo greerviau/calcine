@@ -100,7 +100,7 @@ class SensorStats(Feature):
 async def run_sequential(pipeline: Pipeline, entity_ids: list[str]) -> tuple[float, int]:
     """Standard pipeline.generate() — serial entity processing."""
     t0 = time.perf_counter()
-    report = await pipeline.generate(entity_ids=entity_ids)
+    report = await pipeline.agenerate(entity_ids=entity_ids)
     return time.perf_counter() - t0, report.success_count
 
 
@@ -123,7 +123,7 @@ async def run_concurrent_batches(
     batches = [entity_ids[i : i + batch_size] for i in range(0, len(entity_ids), batch_size)]
 
     async def _batch(ids: list[str]) -> int:
-        r = await pipeline.generate(entity_ids=ids)
+        r = await pipeline.agenerate(entity_ids=ids)
         return r.success_count
 
     results = await asyncio.gather(*[_batch(b) for b in batches])
@@ -156,7 +156,7 @@ async def main() -> None:
     print(f"  {n_ok} OK  |  {t_seq:.2f}s  |  {t_seq / len(entity_ids) * 1000:.1f} ms/entity")
 
     # Spot-check
-    sample = await pipeline.retrieve("sensor_0000")
+    sample = await pipeline.aretrieve("sensor_0000")
     print("\nsensor_0000:")
     for k, v in sample.items():
         print(f"  {k:<16} {v}")

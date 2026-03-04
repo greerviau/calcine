@@ -241,5 +241,5 @@ async def test_bundle_in_pipeline(sample_df):
         store=MemoryStore(),
     )
 
-    report = await pipeline.generate(entity_ids=["u1"])
+    report = await pipeline.agenerate(entity_ids=["u1"])
     assert report.succeeded["u1"]["value"] == pytest.approx(30.0)  # 15.0 * 2

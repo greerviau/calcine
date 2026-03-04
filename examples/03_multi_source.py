@@ -173,7 +173,7 @@ async def main() -> None:
     )
 
     print(f"\nGenerating risk scores for {len(entity_ids):,} entities …")
-    report = await pipeline.generate(entity_ids=entity_ids[:500])  # sample 500
+    report = await pipeline.agenerate(entity_ids=entity_ids[:500])  # sample 500
 
     print(f"  {report.success_count} OK  |  {report.failure_count} failed")
 
@@ -188,7 +188,7 @@ async def main() -> None:
 
     # Spot-check one entity
     sample_id = entity_ids[0]
-    feat = await pipeline.retrieve(sample_id)
+    feat = await pipeline.aretrieve(sample_id)
     print(f"\n{sample_id}:")
     for k, v in feat.items():
         print(f"  {k:<16} {v}")

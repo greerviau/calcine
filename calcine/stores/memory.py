@@ -21,33 +21,33 @@ class MemoryStore(FeatureStore):
 
         store = MemoryStore()
         pipeline = Pipeline(source, feature, store)
-        await pipeline.generate(["u1", "u2"])
+        report = pipeline.generate(["u1", "u2"])
 
-        value = await store.read(feature, "u1")
+        value = store.read(feature, "u1")
     """
 
     def __init__(self) -> None:
         # Structure: {feature_name: {entity_id: data}}
         self._data: dict[str, dict[str, Any]] = {}
 
-    async def write(self, feature: Feature, entity_id: str, data: Any, context: dict | None = None) -> None:
+    async def awrite(self, feature: Feature, entity_id: str, data: Any, context: dict | None = None) -> None:
         key = self._feature_key(feature)
         if key not in self._data:
             self._data[key] = {}
         self._data[key][entity_id] = data
 
-    async def read(self, feature: Feature, entity_id: str) -> Any:
+    async def aread(self, feature: Feature, entity_id: str) -> Any:
         key = self._feature_key(feature)
         try:
             return self._data[key][entity_id]
         except KeyError:
             raise KeyError(f"No data for feature '{key}', entity '{entity_id}'") from None
 
-    async def exists(self, feature: Feature, entity_id: str) -> bool:
+    async def aexists(self, feature: Feature, entity_id: str) -> bool:
         key = self._feature_key(feature)
         return key in self._data and entity_id in self._data[key]
 
-    async def delete(self, feature: Feature, entity_id: str) -> None:
+    async def adelete(self, feature: Feature, entity_id: str) -> None:
         key = self._feature_key(feature)
         try:
             del self._data[key][entity_id]

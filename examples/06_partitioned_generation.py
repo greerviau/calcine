@@ -142,7 +142,7 @@ async def section_a() -> None:
     )
 
     t0 = time.perf_counter()
-    report = await pipeline.generate(entity_ids=SAMPLE)
+    report = await pipeline.agenerate(entity_ids=SAMPLE)
     elapsed = time.perf_counter() - t0
 
     print(f"  Result : {report.success_count} OK  |  {report.failure_count} failed")
@@ -166,7 +166,7 @@ async def section_b() -> None:
     )
 
     t0 = time.perf_counter()
-    report = await pipeline.generate(entity_ids=SAMPLE, concurrency=20)
+    report = await pipeline.agenerate(entity_ids=SAMPLE, concurrency=20)
     elapsed = time.perf_counter() - t0
 
     print(f"  Result : {report.success_count} OK  |  {report.failure_count} failed")
@@ -203,7 +203,7 @@ async def section_c() -> None:
     )
 
     t0 = time.perf_counter()
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         entity_ids=all_ids,
         partition_by=region_of,
         concurrency=REGIONS,  # all 6 regions run at once
@@ -251,7 +251,7 @@ async def section_d() -> None:
     )
 
     t0 = time.perf_counter()
-    report = await pipeline.generate(
+    report = await pipeline.agenerate(
         partitions=explicit,
         concurrency=3,
     )
@@ -282,13 +282,13 @@ async def section_e() -> None:
     # --- First run: process half the sensors ---
     first_half = ids[: len(ids) // 2]
     t0 = time.perf_counter()
-    r1 = await pipeline.generate(entity_ids=first_half, concurrency=20)
+    r1 = await pipeline.agenerate(entity_ids=first_half, concurrency=20)
     t1 = time.perf_counter() - t0
     print(f"\n  First run  ({len(first_half)} sensors): {r1.success_count} OK  [{fmt(t1)}]")
 
     # --- Second run: all sensors, but skip already-stored ones ---
     t0 = time.perf_counter()
-    r2 = await pipeline.generate(entity_ids=ids, concurrency=20, overwrite=False)
+    r2 = await pipeline.agenerate(entity_ids=ids, concurrency=20, overwrite=False)
     t2 = time.perf_counter() - t0
     print(
         f"  Second run ({len(ids)} sensors): "
@@ -335,7 +335,7 @@ async def section_f() -> None:
             flush=True,
         )
 
-    await pipeline.generate(
+    await pipeline.agenerate(
         entity_ids=SAMPLE,
         concurrency=20,
         on_progress=on_progress,
@@ -348,7 +348,7 @@ async def section_f() -> None:
         "\n  To use tqdm:\n"
         "    from tqdm import tqdm\n"
         "    bar = tqdm(total=len(ids))\n"
-        "    await pipeline.generate(\n"
+        "    await pipeline.agenerate(\n"
         "        entity_ids=ids,\n"
         "        on_progress=lambda c, t, _: bar.update(1),\n"
         "    )\n"

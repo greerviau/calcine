@@ -6,8 +6,8 @@ Core abstraction::
 
 tied together by::
 
-    Pipeline.generate(entity_ids)  →  GenerationReport
-    Pipeline.retrieve(entity_id)   →  Any
+    Pipeline.generate(entity_ids)  →  GenerationReport   # sync default
+    Pipeline.retrieve(entity_id)   →  Any                # sync default
 
 Quick start::
 
@@ -16,7 +16,6 @@ Quick start::
     from calcine.features.base import Feature
     from calcine.stores import MemoryStore
     from calcine.schema import FeatureSchema, types
-    import asyncio
 
     class MyFeature(Feature):
         schema = FeatureSchema({"score": types.Float64(nullable=False)})
@@ -30,8 +29,8 @@ Quick start::
         store=MemoryStore(),
     )
 
-    report = await pipeline.generate(["e1", "e2"])
-    value  = await pipeline.retrieve("e1")
+    report = pipeline.generate(["e1", "e2"])
+    value  = pipeline.retrieve("e1")
 """
 
 from .exceptions import CalcineError, SchemaViolationError, SourceError, StoreError

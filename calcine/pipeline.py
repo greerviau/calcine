@@ -204,10 +204,10 @@ class Pipeline:
             store=MemoryStore(),
         )
 
-        report = await pipeline.generate(entity_ids=["u1", "u2"])
+        report = pipeline.generate(entity_ids=["u1", "u2"])
         print(report)  # GenerationReport(succeeded=2, failed=0, skipped=0)
 
-        value = await pipeline.retrieve("u1")
+        value = pipeline.retrieve("u1")
     """
 
     def __init__(
@@ -233,7 +233,7 @@ class Pipeline:
     ) -> None:
         """Process a single entity and update *report* in place."""
         try:
-            if not overwrite and await self.store.exists(self.feature, entity_id):
+            if not overwrite and await self.store.aexists(self.feature, entity_id):
                 report.skipped.add(entity_id)
                 return
 
@@ -260,7 +260,7 @@ class Pipeline:
                 report.failed[entity_id] = errors
                 return
 
-            await self.store.write(self.feature, entity_id, result, context=entity_ctx)
+            await self.store.awrite(self.feature, entity_id, result, context=entity_ctx)
             report.succeeded[entity_id] = result if store_results else None
 
         except Exception as exc:
@@ -293,7 +293,7 @@ class Pipeline:
         to_process: list[str] = []
         for entity_id in entity_ids:
             try:
-                if not overwrite and await self.store.exists(self.feature, entity_id):
+                if not overwrite and await self.store.aexists(self.feature, entity_id):
                     report.skipped.add(entity_id)
                     if on_entity_done is not None:
                         on_entity_done()
@@ -354,7 +354,7 @@ class Pipeline:
                         report.failed[entity_id] = errors
                     else:
                         try:
-                            await self.store.write(
+                            await self.store.awrite(
                                 self.feature, entity_id, result, context=entity_ctx
                             )
                             report.succeeded[entity_id] = result if store_results else None
@@ -440,7 +440,7 @@ class Pipeline:
                     if errors:
                         report.failed[entity_id] = errors
                     else:
-                        await self.store.write(
+                        await self.store.awrite(
                             self.feature, entity_id, result, context=entity_ctxs[entity_id]
                         )
                         report.succeeded[entity_id] = result if store_results else None
@@ -453,7 +453,7 @@ class Pipeline:
             if on_entity_done is not None:
                 on_entity_done()
 
-    async def generate(
+    async def agenerate(
         self,
         entity_ids: list[str] | None = None,
         context: dict[str, Any] | None = None,
@@ -486,13 +486,13 @@ class Pipeline:
         1. **Flat** (default) — pass ``entity_ids``; ``concurrency`` caps how
            many entities (or batches, when *batch_size* > 1) run at once::
 
-               await pipeline.generate(entity_ids=ids, concurrency=16)
+               await pipeline.agenerate(entity_ids=ids, concurrency=16)
 
         2. **Partition function** — pass ``entity_ids`` and ``partition_by``;
            entities are grouped by the function's return value and processed
            serially within each group::
 
-               await pipeline.generate(
+               await pipeline.agenerate(
                    entity_ids=ids,
                    partition_by=lambda eid: eid.split("_")[0],
                    concurrency=8,
@@ -500,7 +500,7 @@ class Pipeline:
 
         3. **Explicit partitions** — pass ``partitions`` directly::
 
-               await pipeline.generate(
+               await pipeline.agenerate(
                    partitions={"shard_0": [...], "shard_1": [...]},
                    concurrency=4,
                )
@@ -663,7 +663,7 @@ class Pipeline:
         )
         return report
 
-    async def retrieve(self, entity_id: str) -> Any:
+    async def aretrieve(self, entity_id: str) -> Any:
         """Read the stored feature value for one entity.
 
         Args:
@@ -676,9 +676,9 @@ class Pipeline:
             KeyError: If no feature has been generated for ``entity_id``.
             StoreError: If the underlying store read fails.
         """
-        return await self.store.read(self.feature, entity_id)
+        return await self.store.aread(self.feature, entity_id)
 
-    async def retrieve_batch(self, entity_ids: list[str]) -> dict[str, Any]:
+    async def aretrieve_batch(self, entity_ids: list[str]) -> dict[str, Any]:
         """Read stored feature values for multiple entities concurrently.
 
         Entities with no stored value are silently omitted from the result.
@@ -693,7 +693,7 @@ class Pipeline:
 
         async def _try_read(entity_id: str) -> tuple[str, Any] | None:
             try:
-                return (entity_id, await self.store.read(self.feature, entity_id))
+                return (entity_id, await self.store.aread(self.feature, entity_id))
             except KeyError:
                 return None
 
@@ -701,34 +701,33 @@ class Pipeline:
         return dict(p for p in pairs if p is not None)
 
     # ------------------------------------------------------------------
-    # Synchronous convenience wrappers
+    # Synchronous public interface (default)
     # ------------------------------------------------------------------
 
-    def generate_sync(self, *args: Any, **kwargs: Any) -> GenerationReport:
-        """Blocking version of :meth:`generate` for use outside an async context.
+    def generate(self, *args: Any, **kwargs: Any) -> GenerationReport:
+        """Extract and store features for a collection of entities.
 
-        Equivalent to ``asyncio.run(pipeline.generate(...))``.  All keyword
-        arguments are forwarded to :meth:`generate` unchanged.
+        Blocking version of :meth:`agenerate` — the default interface for
+        batch jobs, training scripts, and Airflow DAGs.  All keyword arguments
+        are forwarded to :meth:`agenerate` unchanged.
 
-        .. note::
-            Raises ``RuntimeError`` if called from inside a running event loop
-            (e.g. Jupyter notebooks or FastAPI handlers).  Use the async
-            :meth:`generate` directly in those contexts.
+        Use :meth:`agenerate` directly when already inside an async context
+        (FastAPI handlers, async task workers).
         """
-        return asyncio.run(self.generate(*args, **kwargs))
+        return asyncio.run(self.agenerate(*args, **kwargs))
 
-    def retrieve_sync(self, entity_id: str) -> Any:
-        """Blocking version of :meth:`retrieve` for use outside an async context.
+    def retrieve(self, entity_id: str) -> Any:
+        """Read the stored feature value for one entity.
 
-        .. note::
-            Raises ``RuntimeError`` if called from inside a running event loop.
+        Blocking version of :meth:`aretrieve`.  Use :meth:`aretrieve` when
+        already inside an async context.
         """
-        return asyncio.run(self.retrieve(entity_id))
+        return asyncio.run(self.aretrieve(entity_id))
 
-    def retrieve_batch_sync(self, entity_ids: list[str]) -> dict[str, Any]:
-        """Blocking version of :meth:`retrieve_batch` for use outside an async context.
+    def retrieve_batch(self, entity_ids: list[str]) -> dict[str, Any]:
+        """Read stored feature values for multiple entities.
 
-        .. note::
-            Raises ``RuntimeError`` if called from inside a running event loop.
+        Blocking version of :meth:`aretrieve_batch`.  Use
+        :meth:`aretrieve_batch` when already inside an async context.
         """
-        return asyncio.run(self.retrieve_batch(entity_ids))
+        return asyncio.run(self.aretrieve_batch(entity_ids))
