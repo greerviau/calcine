@@ -155,7 +155,7 @@ class Feature(ABC):
         an empty list (no validation).
 
         Args:
-            result: Post-processed feature value.
+            result: Extracted feature value.
 
         Returns:
             List of validation error strings.  Empty means valid.

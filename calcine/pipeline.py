@@ -20,6 +20,49 @@ from .stores.base import FeatureStore
 # ProcessPoolExecutor can pickle them for inter-process dispatch.
 
 
+async def _validate_fanout_result(feature: Feature, fan_out_result: FanOutResult) -> list[str]:
+    """Validate parent metadata and all sub-entity records in a ``FanOutResult``.
+
+    Returns a non-empty list of error strings on failure, empty on success.
+    """
+    if feature.parent_schema is not None and fan_out_result.metadata is not None:
+        errors = feature.parent_schema.validate(fan_out_result.metadata)
+        if errors:
+            return errors
+    all_errors: list[str] = []
+    for sub_id, record in fan_out_result.records.items():
+        for e in await feature.validate(record):
+            all_errors.append(f"sub-entity '{sub_id}': {e}")
+    return all_errors
+
+
+def _run_fanout_entity_in_executor(
+    source: DataSource,
+    feature: Feature,
+    entity_id: str,
+    context: dict[str, Any],
+) -> tuple[FanOutResult, list[str]]:
+    """Run fan-out extract pipeline stages in a thread or process.
+
+    Executes: ``source.read`` → ``feature.extract_many`` → validate.
+    Store writes remain in the main process.
+
+    Returns:
+        ``(fan_out_result, errors)`` where *errors* is non-empty on validation
+        failure and empty on success.
+
+    Raises:
+        Any exception propagated from the pipeline stages.
+    """
+
+    async def _work() -> tuple[FanOutResult, list[str]]:
+        raw = await source.read(entity_id=entity_id, context=context)
+        fan_out_result = await feature.extract_many(raw, context, entity_id)
+        return fan_out_result, await _validate_fanout_result(feature, fan_out_result)
+
+    return asyncio.run(_work())
+
+
 def _run_entity_in_executor(
     source: DataSource,
     feature: Feature,
@@ -222,6 +265,7 @@ class Pipeline:
         report: GenerationReport,
         feature_name: str,
         store_results: bool,
+        executor: Executor | None,
     ) -> None:
         """Process a single fan-out entity and update *report* in place.
 
@@ -236,27 +280,23 @@ class Pipeline:
 
             entity_ctx = {**context, **context_fn(entity_id)} if context_fn else context
 
-            raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
-            fan_out_result: FanOutResult = await self.feature.extract_many(
-                raw, entity_ctx, entity_id
-            )
+            if executor is not None:
+                loop = asyncio.get_running_loop()
+                fan_out_result, errors = await loop.run_in_executor(
+                    executor,
+                    _run_fanout_entity_in_executor,
+                    self.source,
+                    self.feature,
+                    entity_id,
+                    entity_ctx,
+                )
+            else:
+                raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
+                fan_out_result = await self.feature.extract_many(raw, entity_ctx, entity_id)
+                errors = await _validate_fanout_result(self.feature, fan_out_result)
 
-            # Validate parent metadata
-            if self.feature.parent_schema is not None and fan_out_result.metadata is not None:
-                meta_errors = self.feature.parent_schema.validate(fan_out_result.metadata)
-                if meta_errors:
-                    report.failed[entity_id] = meta_errors
-                    return
-
-            # Validate each sub-entity record
-            all_errors: list[str] = []
-            for sub_id, record in fan_out_result.records.items():
-                sub_errors = await self.feature.validate(record)
-                for e in sub_errors:
-                    all_errors.append(f"sub-entity '{sub_id}': {e}")
-
-            if all_errors:
-                report.failed[entity_id] = all_errors
+            if errors:
+                report.failed[entity_id] = errors
                 return
 
             await self.store.awrite_fanout(
@@ -285,7 +325,14 @@ class Pipeline:
         # Fan-out path: delegate when the feature overrides extract_many
         if type(self.feature).extract_many is not Feature.extract_many:
             await self._process_fanout_entity(
-                entity_id, context, context_fn, overwrite, report, feature_name, store_results
+                entity_id,
+                context,
+                context_fn,
+                overwrite,
+                report,
+                feature_name,
+                store_results,
+                executor,
             )
             return
 
@@ -343,7 +390,29 @@ class Pipeline:
         failure isolation is preserved: a ``BaseException`` returned for an
         individual slot is recorded as that entity's failure without
         affecting the rest of the batch.
+
+        Fan-out features (``extract_many``) are not batchable: each entity is
+        processed individually, preserving the same overwrite and error
+        isolation semantics as the per-entity path.
         """
+        # Fan-out path: batch_size is meaningless for extract_many; fall back
+        # to per-entity processing so overwrite/validation logic stays in one place.
+        if type(self.feature).extract_many is not Feature.extract_many:
+            for entity_id in entity_ids:
+                await self._process_fanout_entity(
+                    entity_id,
+                    context,
+                    context_fn,
+                    overwrite,
+                    report,
+                    feature_name,
+                    store_results,
+                    executor,
+                )
+                if on_entity_done is not None:
+                    on_entity_done()
+            return
+
         # --- 1. Overwrite check: separate skips from entities to process ---
         to_process: list[str] = []
         for entity_id in entity_ids:

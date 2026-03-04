@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from calcine import FanOutResult, Pipeline
@@ -416,7 +418,7 @@ async def test_write_fanout_none_metadata_writes_tombstone():
 
 
 # ---------------------------------------------------------------------------
-# Concurrency: fan-out with concurrency > 1
+# Concurrency and batch_size: fan-out routing
 # ---------------------------------------------------------------------------
 
 
@@ -439,3 +441,97 @@ async def test_fanout_concurrent_generate():
     report = await pipeline.agenerate(entity_ids=list(data.keys()), concurrency=5)
     assert report.success_count == 10
     assert report.failure_count == 0
+
+
+@pytest.mark.asyncio
+async def test_fanout_batch_size_falls_back_to_per_entity():
+    """Fan-out features ignore batch_size and still use extract_many per entity."""
+    store = MemoryStore()
+    pipeline = Pipeline(
+        source=SimpleSource(SOURCE_DATA),
+        feature=SegmentFeature(),
+        store=store,
+    )
+    report = await pipeline.agenerate(entity_ids=["rec1", "rec2"], batch_size=4)
+    assert report.success_count == 2
+    assert report.failure_count == 0
+
+    # Sub-entities must still be written correctly
+    assert await store.aexists(SegmentFeature(), "rec1/0")
+    assert await store.aexists(SegmentFeature(), "rec2/0")
+
+
+@pytest.mark.asyncio
+async def test_fanout_batch_size_with_concurrency():
+    """batch_size + concurrency together still route fan-out correctly."""
+    data = {
+        f"r{i}": {
+            "sample_rate": 100,
+            "speaker_id": None,
+            "segments": [{"rms": float(i), "duration_ms": 1.0}],
+        }
+        for i in range(8)
+    }
+    store = MemoryStore()
+    pipeline = Pipeline(
+        source=SimpleSource(data),
+        feature=SegmentFeature(),
+        store=store,
+    )
+    report = await pipeline.agenerate(entity_ids=list(data.keys()), batch_size=4, concurrency=2)
+    assert report.success_count == 8
+    assert report.failure_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Executor: fan-out with ThreadPoolExecutor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fanout_executor_success():
+    store = MemoryStore()
+    pipeline = Pipeline(
+        source=SimpleSource(SOURCE_DATA),
+        feature=SegmentFeature(),
+        store=store,
+    )
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        report = await pipeline.agenerate(entity_ids=["rec1", "rec2"], executor=ex, concurrency=2)
+
+    assert report.success_count == 2
+    assert report.failure_count == 0
+    assert await store.aexists(SegmentFeature(), "rec1/0")
+    assert await store.aexists(SegmentFeature(), "rec2/0")
+
+
+@pytest.mark.asyncio
+async def test_fanout_executor_validation_failure():
+    data = {"e1": {}}
+    store = MemoryStore()
+    pipeline = Pipeline(
+        source=SimpleSource(data),
+        feature=BadRecordFeature(),
+        store=store,
+    )
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        report = await pipeline.agenerate(entity_ids=["e1"], executor=ex)
+
+    assert report.failure_count == 1
+    assert any("e1/1" in e for e in report.failed["e1"])
+
+
+@pytest.mark.asyncio
+async def test_fanout_executor_exception_caught():
+    data = {"e1": {}}
+    store = MemoryStore()
+    pipeline = Pipeline(
+        source=SimpleSource(data),
+        feature=RaisingFeature(),
+        store=store,
+    )
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        report = await pipeline.agenerate(entity_ids=["e1"], executor=ex)
+
+    assert report.failure_count == 1
+    assert "boom" in report.failed["e1"][0]
