@@ -26,8 +26,8 @@ backend, with no lock-in on format or framework.
   combine DataFrames, files, HTTP, or anything custom
 - **Batteries included** — file, DataFrame, and HTTP sources out of the box;
   memory, file, and Parquet stores; pluggable serializers
-- **Fan-out extraction** — `extract_many` produces multiple sub-entity records
-  from one source read; parent metadata and sub-entities are stored independently
+- **Fan-out extraction** — `extract()` returns an `ExtractionResult` with one or
+  more records; parent metadata and sub-entities are stored independently
   and discovered via `store.list_entities(feature, prefix="…")`
 - **Never crashes on partial failure** — `generate()` captures every per-entity
   error in a `GenerationReport`; valid entities are always written
@@ -49,7 +49,7 @@ pip install "calcine[dev]"           # + test/lint tools
 ## Quick start
 
 ```python
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources.base import DataSource
@@ -72,17 +72,17 @@ class UserEngagementFeature(Feature):
         "total_spend": types.Float64(nullable=False),
     })
 
-    async def extract(self, raw: dict, context: dict, entity_id=None) -> dict:
+    async def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
         spend = raw["total_spend"]
         if spend < 100:    tier = "low"
         elif spend < 1000: tier = "mid"
         elif spend < 3000: tier = "high"
         else:              tier = "whale"
-        return {
+        return ExtractionResult.of(entity_id, {
             "spend_tier":  tier,
             "event_rate":  raw["event_count"] / raw["days_active"],
             "total_spend": spend,
-        }
+        })
 
 
 # --- 3. Build and run ---
@@ -128,7 +128,7 @@ pipeline = Pipeline(
 
 
 class MyFeature(Feature):
-    async def extract(self, raw: dict, context: dict) -> dict:
+    async def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
         txns = raw["transactions"]
         prof = raw["profile"]
         embs = raw["embeddings"]
@@ -142,11 +142,11 @@ No assumptions are made about what the sources represent or how they relate.
 ## Fan-out extraction
 
 When one source entity produces multiple independently-stored sub-entity records
-(audio → segments, document → chunks, session → events), override `extract_many`
-instead of `extract`:
+(audio → segments, document → chunks, session → events), return an
+`ExtractionResult` with multiple records from `extract`:
 
 ```python
-from calcine import FanOutResult
+from calcine import ExtractionResult
 
 class AudioSegmentFeature(Feature):
     parent_schema = FeatureSchema({
@@ -157,15 +157,12 @@ class AudioSegmentFeature(Feature):
         "rms": types.Float64(nullable=False),
     })
 
-    async def extract_many(self, raw: bytes, context: dict, entity_id: str) -> FanOutResult:
+    async def extract(self, raw: bytes, context: dict, entity_id: str | None = None) -> ExtractionResult:
         segments = split_audio(raw)
-        return FanOutResult(
+        return ExtractionResult(
             metadata={"sample_rate": 16000, "speaker_id": "alice"},
             records={f"{entity_id}/{i}": {"rms": rms(s)} for i, s in enumerate(segments)},
         )
-
-    async def extract(self, raw, context, entity_id=None):
-        raise NotImplementedError  # pipeline always uses extract_many
 
 
 report = pipeline.generate(entity_ids=recording_ids)
@@ -176,9 +173,10 @@ sub_ids  = store.list_entities(feature, prefix="recording_001/")
 segments = [store.read(feature, sid) for sid in sub_ids]
 ```
 
-The pipeline auto-routes to fan-out when `extract_many` is overridden. Parent
-metadata and sub-entity records are stored under separate keys; `overwrite=False`
-skips the source entity if its parent key already exists.
+`ExtractionResult.of(entity_id, value)` is a convenience constructor for
+single-record features. For fan-out, pass `records` directly with sub-entity IDs.
+Parent metadata and sub-entity records are stored under separate keys;
+`overwrite=False` skips the source entity if its parent key already exists.
 
 ---
 
@@ -259,7 +257,7 @@ uv pip install -e ".[dev]"
 pytest
 ```
 
-185 tests, covering the pipeline, schema, fan-out extraction, all built-in sources and stores.
+189 tests, covering the pipeline, schema, fan-out extraction, all built-in sources and stores.
 
 ---
 
@@ -268,15 +266,15 @@ pytest
 ```
 calcine/
 ├── pipeline.py        Pipeline + GenerationReport
-├── fanout.py          FanOutResult
+├── extraction.py      ExtractionResult
 ├── schema.py          FeatureSchema + type system
 ├── serializers.py     Serializer ABC + Pickle / JSON / Numpy
 ├── exceptions.py      SourceError, StoreError, SchemaViolationError
 ├── sources/           DataSource ABC + FileSource, DataFrameSource, HTTPSource, SourceBundle
-├── features/          Feature ABC (extract + extract_many)
+├── features/          Feature ABC (extract)
 └── stores/            FeatureStore ABC + MemoryStore, FileStore, ParquetStore
 
-tests/                 185 tests mirroring the calcine structure
+tests/                 189 tests mirroring the calcine structure
 examples/              5 runnable end-to-end scripts + generated datasets
 docs/                  Architecture, extension guide, schema reference
 ```

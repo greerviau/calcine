@@ -37,7 +37,7 @@ import asyncio
 import time
 from typing import Any
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources.base import DataSource
@@ -90,13 +90,13 @@ class SensorReading(Feature):
         }
     )
 
-    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         threshold = context.get("alert_threshold", 15.0)
-        return {
+        return ExtractionResult.of(entity_id, {
             "baseline": raw["baseline"],
             "noise": raw["noise"],
             "alert": bool(raw["baseline"] > threshold),
-        }
+        })
 
 
 # ---------------------------------------------------------------------------

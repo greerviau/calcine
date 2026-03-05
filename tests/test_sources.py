@@ -222,15 +222,15 @@ def test_bundle_requires_at_least_one_source():
 @pytest.mark.asyncio
 async def test_bundle_in_pipeline(sample_df):
     """SourceBundle integrates end-to-end with Pipeline."""
-    from calcine import Pipeline
+    from calcine import ExtractionResult, Pipeline
     from calcine.features.base import Feature
     from calcine.stores import MemoryStore
 
     class CombinedFeature(Feature):
-        async def extract(self, raw: dict, context: dict, entity_id=None) -> dict:
+        async def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
             frame = raw["purchases"]
             multiplier = raw["config"]["multiplier"]
-            return {"value": float(frame["amount"].mean()) * multiplier}
+            return ExtractionResult.of(entity_id, {"value": float(frame["amount"].mean()) * multiplier})
 
     pipeline = Pipeline(
         source=SourceBundle(
@@ -242,4 +242,4 @@ async def test_bundle_in_pipeline(sample_df):
     )
 
     report = await pipeline.agenerate(entity_ids=["u1"])
-    assert report.succeeded["u1"]["value"] == pytest.approx(30.0)  # 15.0 * 2
+    assert report.succeeded["u1"].records["u1"]["value"] == pytest.approx(30.0)  # 15.0 * 2

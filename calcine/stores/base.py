@@ -6,8 +6,9 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from ..extraction import ExtractionResult
+
 if TYPE_CHECKING:
-    from ..fanout import FanOutResult
     from ..features.base import Feature
 
 
@@ -28,6 +29,15 @@ class FeatureStore(ABC):
     implementation interface.  Sync wrappers (``read``, ``write``, ``exists``,
     ``delete``) are provided for use outside an async context.
 
+    ``awrite`` always receives an :class:`~calcine.ExtractionResult`.  For
+    single-record features, ``result.records`` contains exactly one entry keyed
+    by ``entity_id``.  For fan-out features, ``result.records`` contains the
+    sub-entity entries and ``result.metadata`` (if set) is stored under
+    ``entity_id``.  Implementations should write all records and the metadata
+    (or a ``{}`` tombstone when metadata is ``None`` and ``entity_id`` is not
+    already in ``result.records``) to support ``overwrite=False`` existence
+    checks.
+
     Minimal read-only example::
 
         class RemoteFeatureStore(FeatureStore):
@@ -40,9 +50,16 @@ class FeatureStore(ABC):
             def __init__(self, redis_client):
                 self.redis = redis_client
 
-            async def awrite(self, feature, entity_id, data, context=None):
-                key = f"{self._feature_key(feature)}:{entity_id}"
-                await self.redis.set(key, pickle.dumps(data))
+            async def awrite(self, feature, entity_id, result, context=None):
+                # Write metadata / tombstone under parent key
+                if entity_id not in result.records:
+                    parent = result.metadata if result.metadata is not None else {}
+                    key = f"{self._feature_key(feature)}:{entity_id}"
+                    await self.redis.set(key, pickle.dumps(parent))
+                # Write each record
+                for sub_id, record in result.records.items():
+                    key = f"{self._feature_key(feature)}:{sub_id}"
+                    await self.redis.set(key, pickle.dumps(record))
 
             async def aread(self, feature, entity_id):
                 key = f"{self._feature_key(feature)}:{entity_id}"
@@ -65,15 +82,22 @@ class FeatureStore(ABC):
         self,
         feature: Feature,
         entity_id: str,
-        data: Any,
+        result: ExtractionResult,
         context: dict | None = None,
     ) -> None:
-        """Persist a feature value for an entity.
+        """Persist an extraction result for a source entity.
+
+        Writes metadata (or a ``{}`` tombstone) under ``entity_id`` when
+        ``entity_id`` is not already a key in ``result.records``, then writes
+        each record in ``result.records`` under its own key.  This ensures
+        ``aexists(feature, entity_id)`` returns ``True`` after any write,
+        enabling ``overwrite=False`` to work correctly for both single-record
+        and fan-out features.
 
         Args:
             feature: The ``Feature`` instance (class name used as namespace).
-            entity_id: Unique entity identifier.
-            data: Extracted feature value to store.
+            entity_id: Source entity identifier (parent write key).
+            result: :class:`~calcine.ExtractionResult` from ``Feature.extract``.
             context: The pipeline context dict at write time.  Implementations
                 may use this for routing (e.g. sharding writes by region) while
                 keeping ``aread`` context-free.  Ignored by default.
@@ -130,38 +154,6 @@ class FeatureStore(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support delete operations.")
 
-    async def awrite_fanout(
-        self,
-        feature: Feature,
-        entity_id: str,
-        result: FanOutResult,
-        context: dict | None = None,
-    ) -> None:
-        """Persist a fan-out extraction result for a source entity.
-
-        Writes parent metadata under ``entity_id`` and each sub-entity record
-        under its own key.  A sentinel ``{}`` is written when
-        ``result.metadata`` is ``None`` so that ``overwrite=False`` existence
-        checks work correctly for fan-out features without parent metadata.
-
-        Override this in stores that support atomic multi-key writes (e.g. a
-        single SQL transaction).  The default calls :meth:`awrite` sequentially.
-
-        Args:
-            feature: The ``Feature`` instance.
-            entity_id: Source entity identifier (used as the parent store key).
-            result: :class:`~calcine.FanOutResult` from ``Feature.extract_many``.
-            context: Pipeline context dict at write time.
-
-        Raises:
-            StoreError: If any write operation fails.
-        """
-        # Always write parent entry (metadata or tombstone) for overwrite=False support.
-        parent_data = result.metadata if result.metadata is not None else {}
-        await self.awrite(feature, entity_id, parent_data, context=context)
-        for sub_id, record in result.records.items():
-            await self.awrite(feature, sub_id, record, context=context)
-
     async def alist_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
         """Return entity IDs stored for a feature, optionally filtered by prefix.
 
@@ -187,11 +179,11 @@ class FeatureStore(ABC):
         self,
         feature: Feature,
         entity_id: str,
-        data: Any,
+        result: ExtractionResult,
         context: dict | None = None,
     ) -> None:
         """Blocking version of :meth:`awrite` for use outside an async context."""
-        return asyncio.run(self.awrite(feature, entity_id, data, context))
+        return asyncio.run(self.awrite(feature, entity_id, result, context))
 
     def read(self, feature: Feature, entity_id: str) -> Any:
         """Blocking version of :meth:`aread` for use outside an async context."""
@@ -204,16 +196,6 @@ class FeatureStore(ABC):
     def delete(self, feature: Feature, entity_id: str) -> None:
         """Blocking version of :meth:`adelete` for use outside an async context."""
         return asyncio.run(self.adelete(feature, entity_id))
-
-    def write_fanout(
-        self,
-        feature: Feature,
-        entity_id: str,
-        result: FanOutResult,
-        context: dict | None = None,
-    ) -> None:
-        """Blocking version of :meth:`awrite_fanout` for use outside an async context."""
-        return asyncio.run(self.awrite_fanout(feature, entity_id, result, context))
 
     def list_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
         """Blocking version of :meth:`alist_entities` for use outside an async context."""

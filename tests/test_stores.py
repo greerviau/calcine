@@ -7,6 +7,7 @@ import tempfile
 import numpy as np
 import pytest
 
+from calcine import ExtractionResult
 from calcine.features.base import Feature
 from calcine.serializers import JSONSerializer, NumpySerializer
 from calcine.stores import FileStore, MemoryStore
@@ -29,12 +30,12 @@ except ImportError:
 
 class DummyFeature(Feature):
     async def extract(self, raw, context, entity_id=None):
-        return raw
+        return ExtractionResult.of(entity_id, raw)
 
 
 class AnotherFeature(Feature):
     async def extract(self, raw, context, entity_id=None):
-        return raw
+        return ExtractionResult.of(entity_id, raw)
 
 
 @pytest.fixture
@@ -51,7 +52,7 @@ class TestMemoryStore:
     @pytest.mark.asyncio
     async def test_write_and_read(self, feature):
         store = MemoryStore()
-        await store.awrite(feature, "e1", {"score": 0.9})
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", {"score": 0.9}))
         assert await store.aread(feature, "e1") == {"score": 0.9}
 
     @pytest.mark.asyncio
@@ -62,13 +63,13 @@ class TestMemoryStore:
     @pytest.mark.asyncio
     async def test_exists_true_after_write(self, feature):
         store = MemoryStore()
-        await store.awrite(feature, "e1", 42)
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", 42))
         assert await store.aexists(feature, "e1")
 
     @pytest.mark.asyncio
     async def test_delete(self, feature):
         store = MemoryStore()
-        await store.awrite(feature, "e1", "data")
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", "data"))
         await store.adelete(feature, "e1")
         assert not await store.aexists(feature, "e1")
 
@@ -87,8 +88,8 @@ class TestMemoryStore:
     @pytest.mark.asyncio
     async def test_overwrite(self, feature):
         store = MemoryStore()
-        await store.awrite(feature, "e1", "first")
-        await store.awrite(feature, "e1", "second")
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", "first"))
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", "second"))
         assert await store.aread(feature, "e1") == "second"
 
     @pytest.mark.asyncio
@@ -98,8 +99,8 @@ class TestMemoryStore:
         fb = AnotherFeature()
         store = MemoryStore()
 
-        await store.awrite(fa, "e1", "value_a")
-        await store.awrite(fb, "e1", "value_b")
+        await store.awrite(fa, "e1", ExtractionResult.of("e1", "value_a"))
+        await store.awrite(fb, "e1", ExtractionResult.of("e1", "value_b"))
 
         assert await store.aread(fa, "e1") == "value_a"
         assert await store.aread(fb, "e1") == "value_b"
@@ -108,7 +109,7 @@ class TestMemoryStore:
     async def test_stores_arbitrary_types(self, feature):
         store = MemoryStore()
         arr = np.zeros((3, 4), dtype=np.float32)
-        await store.awrite(feature, "e1", arr)
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", arr))
         result = await store.aread(feature, "e1")
         np.testing.assert_array_equal(result, arr)
 
@@ -123,7 +124,7 @@ class TestFileStore:
     async def test_write_and_read_pickle(self, feature):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(tmpdir)
-            await store.awrite(feature, "e1", {"key": "val", "num": 7})
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"key": "val", "num": 7}))
             result = await store.aread(feature, "e1")
             assert result == {"key": "val", "num": 7}
 
@@ -132,14 +133,14 @@ class TestFileStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(tmpdir)
             assert not await store.aexists(feature, "e1")
-            await store.awrite(feature, "e1", "hello")
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", "hello"))
             assert await store.aexists(feature, "e1")
 
     @pytest.mark.asyncio
     async def test_delete(self, feature):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(tmpdir)
-            await store.awrite(feature, "e1", "data")
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", "data"))
             await store.adelete(feature, "e1")
             assert not await store.aexists(feature, "e1")
 
@@ -155,7 +156,7 @@ class TestFileStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(tmpdir, serializer=JSONSerializer())
             payload = {"name": "alice", "count": 42}
-            await store.awrite(feature, "e1", payload)
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", payload))
             assert await store.aread(feature, "e1") == payload
 
     @pytest.mark.asyncio
@@ -163,7 +164,7 @@ class TestFileStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(tmpdir, serializer=NumpySerializer())
             arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-            await store.awrite(feature, "e1", arr)
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", arr))
             result = await store.aread(feature, "e1")
             np.testing.assert_array_equal(result, arr)
 
@@ -172,15 +173,15 @@ class TestFileStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             nested = f"{tmpdir}/a/b/c"
             store = FileStore(nested)
-            await store.awrite(feature, "e1", "nested")
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", "nested"))
             assert await store.aread(feature, "e1") == "nested"
 
     @pytest.mark.asyncio
     async def test_overwrite(self, feature):
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileStore(tmpdir)
-            await store.awrite(feature, "e1", "v1")
-            await store.awrite(feature, "e1", "v2")
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", "v1"))
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", "v2"))
             assert await store.aread(feature, "e1") == "v2"
 
 
@@ -197,7 +198,7 @@ class TestParquetStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", {"score": 0.5, "count": 3})
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"score": 0.5, "count": 3}))
             result = await store.aread(feature, "e1")
             assert result["score"] == pytest.approx(0.5)
             assert result["count"] == 3
@@ -209,7 +210,7 @@ class TestParquetStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = ParquetStore(tmpdir)
             assert not await store.aexists(feature, "e1")
-            await store.awrite(feature, "e1", {"v": 1.0})
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
             assert await store.aexists(feature, "e1")
 
     @pytest.mark.asyncio
@@ -218,7 +219,7 @@ class TestParquetStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", {"v": 1.0})
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
             await store.adelete(feature, "e1")
             assert not await store.aexists(feature, "e1")
 
@@ -228,8 +229,8 @@ class TestParquetStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", {"v": 1.0})
-            await store.awrite(feature, "e2", {"v": 2.0})
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
+            await store.awrite(feature, "e2", ExtractionResult.of("e2", {"v": 2.0}))
 
             r1 = await store.aread(feature, "e1")
             r2 = await store.aread(feature, "e2")
@@ -242,8 +243,8 @@ class TestParquetStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", {"v": 1.0})
-            await store.awrite(feature, "e1", {"v": 99.0})
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
+            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 99.0}))
             result = await store.aread(feature, "e1")
             assert result["v"] == pytest.approx(99.0)
 
@@ -289,7 +290,7 @@ async def test_read_only_store_write_raises_not_implemented():
     store = ReadOnlyStore({})
     feature = DummyFeature()
     with pytest.raises(NotImplementedError, match="write"):
-        await store.awrite(feature, "e1", {"v": 1})
+        await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1}))
 
 
 @pytest.mark.asyncio

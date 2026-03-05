@@ -20,8 +20,8 @@ Quick start::
     class MyFeature(Feature):
         schema = FeatureSchema({"score": types.Float64(nullable=False)})
 
-        async def extract(self, raw, context):
-            return {"score": raw["value"].mean()}
+        async def extract(self, raw, context, entity_id=None):
+            return ExtractionResult.of(entity_id, {"score": raw["value"].mean()})
 
     pipeline = Pipeline(
         source=DataFrameSource(df),
@@ -34,7 +34,7 @@ Quick start::
 """
 
 from .exceptions import CalcineError, SchemaViolationError, SourceError, StoreError
-from .fanout import FanOutResult
+from .extraction import ExtractionResult
 from .features.base import Feature
 from .pipeline import GenerationReport, Pipeline
 from .schema import FeatureSchema, types
@@ -48,8 +48,8 @@ __all__ = [
     # Pipeline
     "Pipeline",
     "GenerationReport",
-    # Fan-out
-    "FanOutResult",
+    # Extraction
+    "ExtractionResult",
     # ABCs
     "Feature",
     "DataSource",

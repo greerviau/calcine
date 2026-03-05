@@ -59,7 +59,7 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [ ] **Store bulk read + DataFrame export** — Add `read_many(feature, entity_ids) -> list[Any]` for validated bulk retrieval, and `to_dataframe(feature, entity_ids) -> pd.DataFrame` for ML-ready export with correct dtypes derived from the schema. Both sync by default with `aread_many` / `ato_dataframe` async variants. Without this, the typed contract story only holds for single-entity lookups; training workflows have no clean path through the store. `read_many` also supersedes the existing `retrieve_batch` on `Pipeline`.
 
-- [x] **Fan-out extraction (`extract_many` + `FanOutResult`)** — `FanOutResult(records, metadata)` returned by `Feature.extract_many`; pipeline auto-routes when `extract_many` is overridden; `parent_schema` validates metadata, `schema` validates each record; `MemoryStore` implements `alist_entities(feature, prefix)`; `overwrite=False` checks parent entity_id.
+- [x] **Fan-out extraction (`ExtractionResult`)** — `ExtractionResult(records, metadata)` is the universal return type from `Feature.extract`; single-record features use `ExtractionResult.of(entity_id, value)`; `parent_schema` validates metadata, `schema` validates each record; `MemoryStore` implements `alist_entities(feature, prefix)`; `overwrite=False` checks parent entity_id.
 
 - [ ] **Fault-tolerant SourceBundle** — Add `SourceBundle(..., fault_tolerant: bool = False)`. When enabled, a failing sub-source returns `None` for its key rather than propagating the exception. Lets features degrade gracefully when optional sources are unavailable.
 
@@ -77,7 +77,7 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [ ] **`Pipeline` async context manager** — Support `async with Pipeline(...) as p:` so stores that need setup/teardown (e.g., connection pools) can manage their lifecycle cleanly.
 
-- [ ] **Store inspection and prefix-based entity listing** — Add `FeatureStore.list_features() -> list[str]` and `FeatureStore.list_entities(feature, prefix: str | None = None) -> list[str]`. Prefix filtering is a first-class requirement, not an afterthought: it is the primary mechanism for discovering sub-entities produced by `extract_many` (e.g. `store.list_entities(AudioSegmentFeature, prefix="recording_001/")`).
+- [ ] **Store inspection and prefix-based entity listing** — Add `FeatureStore.list_features() -> list[str]` and `FeatureStore.list_entities(feature, prefix: str | None = None) -> list[str]`. Prefix filtering is a first-class requirement, not an afterthought: it is the primary mechanism for discovering sub-entities produced by fan-out features (e.g. `store.list_entities(AudioSegmentFeature, prefix="recording_001/")`).
 
 - [ ] **HTTPSource retry/backoff** — Add `retries: int = 0` and `backoff: float = 0.5` parameters to `HTTPSource`. Retry on transient HTTP errors (5xx, timeouts) with exponential backoff.
 

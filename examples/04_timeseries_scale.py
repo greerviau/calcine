@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.serializers import JSONSerializer
@@ -59,7 +59,7 @@ class SensorStats(Feature):
         }
     )
 
-    async def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> ExtractionResult:
         if raw.empty:
             raise ValueError("No readings for this sensor")
 
@@ -78,7 +78,7 @@ class SensorStats(Feature):
         # Spikes: readings more than 3σ from the mean
         spikes = int((np.abs(v - mu) > 3 * std).sum())
 
-        return {
+        return ExtractionResult.of(entity_id, {
             "n_readings": int(len(v)),
             "mean": round(mu, 4),
             "std": round(float(v.std(ddof=0)), 4),
@@ -89,7 +89,7 @@ class SensorStats(Feature):
             "trend_slope": round(slope, 6),
             "anomaly_score": round(anomaly, 4),
             "spike_count": spikes,
-        }
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ async def main() -> None:
     class SlowFeature(Feature):
         async def extract(self, raw, context, entity_id=None):
             await asyncio.sleep(0.002)  # simulate async API call
-            return {"value": 1.0}
+            return ExtractionResult.of(entity_id, {"value": 1.0})
 
     slow_pipeline = Pipeline(
         source=DataFrameSource(df),

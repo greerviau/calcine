@@ -52,7 +52,7 @@ from typing import Any
 
 import numpy as np
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources.base import DataSource
@@ -106,11 +106,11 @@ class IndividualEmbedding(Feature):
 
     schema = FeatureSchema({"embedding": types.NDArray(shape=(EMBEDDING_DIM,), dtype="float32")})
 
-    async def extract(self, raw: np.ndarray, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: np.ndarray, context: dict, entity_id: str | None = None) -> ExtractionResult:
         # Simulate per-call overhead (HTTP round-trip, model warm-up, etc.)
         await asyncio.sleep(EXTRACT_OVERHEAD + EXTRACT_PER_ITEM)
         embedding = raw @ WEIGHT_MATRIX
-        return {"embedding": embedding}
+        return ExtractionResult.of(entity_id, {"embedding": embedding})
 
 
 class BatchEmbedding(Feature):
@@ -118,11 +118,11 @@ class BatchEmbedding(Feature):
 
     schema = FeatureSchema({"embedding": types.NDArray(shape=(EMBEDDING_DIM,), dtype="float32")})
 
-    async def extract(self, raw: np.ndarray, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: np.ndarray, context: dict, entity_id: str | None = None) -> ExtractionResult:
         # Fallback for the default extract_batch path (shouldn't normally be called
         # when batch_size > 1, but keeps the class fully functional on its own)
         await asyncio.sleep(EXTRACT_OVERHEAD + EXTRACT_PER_ITEM)
-        return {"embedding": raw @ WEIGHT_MATRIX}
+        return ExtractionResult.of(entity_id, {"embedding": raw @ WEIGHT_MATRIX})
 
     async def extract_batch(
         self,
@@ -130,7 +130,7 @@ class BatchEmbedding(Feature):
         context: dict,
         entity_ids: list[str] | None = None,
         entity_contexts: list[dict] | None = None,
-    ) -> list[dict | BaseException]:
+    ) -> list[ExtractionResult | BaseException]:
         # One "API call" for the whole batch: fixed overhead + tiny per-item cost
         n = len(raws)
         await asyncio.sleep(BATCH_OVERHEAD + BATCH_PER_ITEM * n)
@@ -139,7 +139,8 @@ class BatchEmbedding(Feature):
         batch_matrix = np.stack(raws)  # (N, INPUT_DIM)
         embeddings = batch_matrix @ WEIGHT_MATRIX  # (N, EMBEDDING_DIM)
 
-        return [{"embedding": embeddings[i]} for i in range(n)]
+        eid = entity_ids or [None] * n
+        return [ExtractionResult.of(eid[i], {"embedding": embeddings[i]}) for i in range(n)]
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import Any
 
-from .fanout import FanOutResult
+from .extraction import ExtractionResult
 from .features.base import Feature
 from .sources.base import DataSource
 from .stores.base import FeatureStore
@@ -20,47 +20,23 @@ from .stores.base import FeatureStore
 # ProcessPoolExecutor can pickle them for inter-process dispatch.
 
 
-async def _validate_fanout_result(feature: Feature, fan_out_result: FanOutResult) -> list[str]:
-    """Validate parent metadata and all sub-entity records in a ``FanOutResult``.
+async def _validate_extraction(feature: Feature, result: ExtractionResult) -> list[str]:
+    """Validate metadata and all records in an ``ExtractionResult``.
 
     Returns a non-empty list of error strings on failure, empty on success.
+    For results with more than one record, errors are prefixed with the
+    sub-entity ID so callers can identify which record failed.
     """
-    if feature.parent_schema is not None and fan_out_result.metadata is not None:
-        errors = feature.parent_schema.validate(fan_out_result.metadata)
+    if feature.parent_schema is not None and result.metadata is not None:
+        errors = feature.parent_schema.validate(result.metadata)
         if errors:
             return errors
+    multi = len(result.records) > 1
     all_errors: list[str] = []
-    for sub_id, record in fan_out_result.records.items():
+    for sub_id, record in result.records.items():
         for e in await feature.validate(record):
-            all_errors.append(f"sub-entity '{sub_id}': {e}")
+            all_errors.append(f"sub-entity '{sub_id}': {e}" if multi else e)
     return all_errors
-
-
-def _run_fanout_entity_in_executor(
-    source: DataSource,
-    feature: Feature,
-    entity_id: str,
-    context: dict[str, Any],
-) -> tuple[FanOutResult, list[str]]:
-    """Run fan-out extract pipeline stages in a thread or process.
-
-    Executes: ``source.read`` → ``feature.extract_many`` → validate.
-    Store writes remain in the main process.
-
-    Returns:
-        ``(fan_out_result, errors)`` where *errors* is non-empty on validation
-        failure and empty on success.
-
-    Raises:
-        Any exception propagated from the pipeline stages.
-    """
-
-    async def _work() -> tuple[FanOutResult, list[str]]:
-        raw = await source.read(entity_id=entity_id, context=context)
-        fan_out_result = await feature.extract_many(raw, context, entity_id)
-        return fan_out_result, await _validate_fanout_result(feature, fan_out_result)
-
-    return asyncio.run(_work())
 
 
 def _run_entity_in_executor(
@@ -68,10 +44,10 @@ def _run_entity_in_executor(
     feature: Feature,
     entity_id: str,
     context: dict[str, Any],
-) -> tuple[Any, list[str]]:
+) -> tuple[ExtractionResult, list[str]]:
     """Run one entity's extract pipeline stages in a thread or process.
 
-    Executes: ``source.read`` → ``feature.extract`` → ``feature.validate``.
+    Executes: ``source.read`` → ``feature.extract`` → validate.
 
     Store writes are intentionally excluded so they remain in the main
     process (preserving correct behaviour for in-memory and async stores).
@@ -85,11 +61,10 @@ def _run_entity_in_executor(
         records it as an unhandled pipeline error.
     """
 
-    async def _work() -> tuple[Any, list[str]]:
+    async def _work() -> tuple[ExtractionResult, list[str]]:
         raw = await source.read(entity_id=entity_id, context=context)
         result = await feature.extract(raw, context, entity_id=entity_id)
-        errors = await feature.validate(result)
-        return result, errors
+        return result, await _validate_extraction(feature, result)
 
     return asyncio.run(_work())
 
@@ -100,7 +75,7 @@ def _run_batch_in_executor(
     entity_ids: list[str],
     context: dict[str, Any],
     entity_contexts: list[dict[str, Any]] | None,
-) -> list[tuple[Any, list[str]] | BaseException]:
+) -> list[tuple[ExtractionResult, list[str]] | BaseException]:
     """Run one batch's extract pipeline stages in a thread or process.
 
     Mirrors the logic of ``Pipeline._process_batch`` steps 2–4
@@ -112,7 +87,7 @@ def _run_batch_in_executor(
         One entry per item in *entity_ids*, in order:
 
         - ``(result, [])`` — success
-        - ``(None, errors_list)`` — validation failure
+        - ``(result, errors_list)`` — validation failure
         - ``BaseException`` — unhandled error for that entity
 
     A whole-batch ``extract_batch`` failure is caught and stored as a
@@ -120,7 +95,7 @@ def _run_batch_in_executor(
     failure isolation as the non-executor path.
     """
 
-    async def _work() -> list[tuple[Any, list[str]] | BaseException]:
+    async def _work() -> list[tuple[ExtractionResult, list[str]] | BaseException]:
         # --- Concurrent reads ---
         raw_results: list[Any] = await asyncio.gather(
             *[
@@ -133,7 +108,7 @@ def _run_batch_in_executor(
             return_exceptions=True,
         )
 
-        results: dict[int, tuple[Any, list[str]] | BaseException] = {}
+        results: dict[int, tuple[ExtractionResult, list[str]] | BaseException] = {}
         valid_indices: list[int] = []
         valid_raws: list[Any] = []
 
@@ -155,7 +130,7 @@ def _run_batch_in_executor(
 
         # --- Batch extract ---
         try:
-            batch_results: list[Any] = await feature.extract_batch(
+            batch_results: list[ExtractionResult | BaseException] = await feature.extract_batch(
                 valid_raws, context, entity_ids=valid_ids, entity_contexts=valid_entity_ctxs
             )
         except Exception as exc:
@@ -169,7 +144,7 @@ def _run_batch_in_executor(
                 results[idx] = result
                 continue
             try:
-                errors = await feature.validate(result)
+                errors = await _validate_extraction(feature, result)
                 results[idx] = (result, errors)
             except Exception as exc:
                 results[idx] = exc
@@ -256,60 +231,6 @@ class Pipeline:
         self.feature = feature
         self.store = store
 
-    async def _process_fanout_entity(
-        self,
-        entity_id: str,
-        context: dict[str, Any],
-        context_fn: Callable[[str], dict[str, Any]] | None,
-        overwrite: bool,
-        report: GenerationReport,
-        feature_name: str,
-        store_results: bool,
-        executor: Executor | None,
-    ) -> None:
-        """Process a single fan-out entity and update *report* in place.
-
-        Fan-out entities produce multiple sub-entity records from one source
-        read.  The parent ``entity_id`` is used as the overwrite-check key and
-        as the store key for ``FanOutResult.metadata``.
-        """
-        try:
-            if not overwrite and await self.store.aexists(self.feature, entity_id):
-                report.skipped.add(entity_id)
-                return
-
-            entity_ctx = {**context, **context_fn(entity_id)} if context_fn else context
-
-            if executor is not None:
-                loop = asyncio.get_running_loop()
-                fan_out_result, errors = await loop.run_in_executor(
-                    executor,
-                    _run_fanout_entity_in_executor,
-                    self.source,
-                    self.feature,
-                    entity_id,
-                    entity_ctx,
-                )
-            else:
-                raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
-                fan_out_result = await self.feature.extract_many(raw, entity_ctx, entity_id)
-                errors = await _validate_fanout_result(self.feature, fan_out_result)
-
-            if errors:
-                report.failed[entity_id] = errors
-                return
-
-            await self.store.awrite_fanout(
-                self.feature, entity_id, fan_out_result, context=entity_ctx
-            )
-            report.succeeded[entity_id] = fan_out_result if store_results else None
-
-        except Exception as exc:
-            report.failed[entity_id] = [
-                f"Unhandled exception in pipeline for feature '{feature_name}', "
-                f"entity '{entity_id}': {type(exc).__name__}: {exc}"
-            ]
-
     async def _process_entity(
         self,
         entity_id: str,
@@ -322,20 +243,6 @@ class Pipeline:
         executor: Executor | None,
     ) -> None:
         """Process a single entity and update *report* in place."""
-        # Fan-out path: delegate when the feature overrides extract_many
-        if type(self.feature).extract_many is not Feature.extract_many:
-            await self._process_fanout_entity(
-                entity_id,
-                context,
-                context_fn,
-                overwrite,
-                report,
-                feature_name,
-                store_results,
-                executor,
-            )
-            return
-
         try:
             if not overwrite and await self.store.aexists(self.feature, entity_id):
                 report.skipped.add(entity_id)
@@ -356,7 +263,7 @@ class Pipeline:
             else:
                 raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
                 result = await self.feature.extract(raw, entity_ctx, entity_id=entity_id)
-                errors = await self.feature.validate(result)
+                errors = await _validate_extraction(self.feature, result)
 
             if errors:
                 report.failed[entity_id] = errors
@@ -390,29 +297,7 @@ class Pipeline:
         failure isolation is preserved: a ``BaseException`` returned for an
         individual slot is recorded as that entity's failure without
         affecting the rest of the batch.
-
-        Fan-out features (``extract_many``) are not batchable: each entity is
-        processed individually, preserving the same overwrite and error
-        isolation semantics as the per-entity path.
         """
-        # Fan-out path: batch_size is meaningless for extract_many; fall back
-        # to per-entity processing so overwrite/validation logic stays in one place.
-        if type(self.feature).extract_many is not Feature.extract_many:
-            for entity_id in entity_ids:
-                await self._process_fanout_entity(
-                    entity_id,
-                    context,
-                    context_fn,
-                    overwrite,
-                    report,
-                    feature_name,
-                    store_results,
-                    executor,
-                )
-                if on_entity_done is not None:
-                    on_entity_done()
-            return
-
         # --- 1. Overwrite check: separate skips from entities to process ---
         to_process: list[str] = []
         for entity_id in entity_ids:
@@ -443,7 +328,7 @@ class Pipeline:
             loop = asyncio.get_running_loop()
             try:
                 slot_results: list[
-                    tuple[Any, list[str]] | BaseException
+                    tuple[ExtractionResult, list[str]] | BaseException
                 ] = await loop.run_in_executor(
                     executor,
                     _run_batch_in_executor,
@@ -526,7 +411,7 @@ class Pipeline:
             [entity_ctxs[eid] for eid in valid_ids] if context_fn else None
         )
         try:
-            batch_results: list[Any] = await self.feature.extract_batch(
+            batch_results: list[ExtractionResult | BaseException] = await self.feature.extract_batch(
                 valid_raws,
                 context,
                 entity_ids=valid_ids,
@@ -552,7 +437,7 @@ class Pipeline:
                 ]
             else:
                 try:
-                    errors = await self.feature.validate(result)
+                    errors = await _validate_extraction(self.feature, result)
                     if errors:
                         report.failed[entity_id] = errors
                     else:

@@ -24,7 +24,7 @@ from typing import Any
 
 import pandas as pd
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources import DataFrameSource, SourceBundle
@@ -65,9 +65,9 @@ async def demo_nan() -> None:
 
         async def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
-        ) -> dict:
+        ) -> ExtractionResult:
             # mean() on an empty group returns NaN
-            return {"score": float(raw["amount"].mean())}
+            return ExtractionResult.of(entity_id, {"score": float(raw["amount"].mean())})
 
     pipeline = Pipeline(
         source=DataFrameSource(DF),
@@ -77,7 +77,8 @@ async def demo_nan() -> None:
     # u_ghost has no rows → mean() returns NaN → schema passes → stored silently
     report = await pipeline.agenerate(entity_ids=["u1", "u_ghost"])
     ghost_result = report.succeeded.get("u_ghost")
-    print(f"  u_ghost (no rows): in succeeded={ghost_result is not None}, value={ghost_result}")
+    ghost_value = ghost_result.records.get("u_ghost") if ghost_result is not None else None
+    print(f"  u_ghost (no rows): in succeeded={ghost_result is not None}, value={ghost_value}")
     print()
 
     print("  MITIGATION — reject NaN/Inf at the end of extract():\n")
@@ -87,7 +88,7 @@ async def demo_nan() -> None:
         "        for k, v in result.items():\n"
         "            if isinstance(v, float) and not math.isfinite(v):\n"
         "                raise ValueError(f'Non-finite value for {k!r}: {v}')\n"
-        "        return result"
+        "        return ExtractionResult.of(entity_id, result)"
     )
 
     class SafeNanFeature(Feature):
@@ -95,12 +96,12 @@ async def demo_nan() -> None:
 
         async def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
-        ) -> dict:
+        ) -> ExtractionResult:
             result = {"score": float(raw["amount"].mean())}
             for k, v in result.items():
                 if isinstance(v, float) and not math.isfinite(v):
                     raise ValueError(f"Non-finite value for {k!r}: {v!r}")
-            return result
+            return ExtractionResult.of(entity_id, result)
 
     pipeline2 = Pipeline(
         source=DataFrameSource(DF),
@@ -131,9 +132,9 @@ async def demo_empty_source() -> None:
 
         async def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
-        ) -> dict:
+        ) -> ExtractionResult:
             # This does NOT raise on empty — it returns NaN (see weak point A)
-            return {"mean": float(raw["amount"].mean())}
+            return ExtractionResult.of(entity_id, {"mean": float(raw["amount"].mean())})
 
     r = await Pipeline(
         source=DataFrameSource(DF),
@@ -157,10 +158,10 @@ async def demo_empty_source() -> None:
 
         async def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
-        ) -> dict:
+        ) -> ExtractionResult:
             if raw.empty:
                 raise ValueError("No source data for this entity")
-            return {"mean": float(raw["amount"].mean())}
+            return ExtractionResult.of(entity_id, {"mean": float(raw["amount"].mean())})
 
     r2 = await Pipeline(
         source=DataFrameSource(DF),
@@ -190,7 +191,7 @@ async def demo_bundle_partial_failure() -> None:
 
     class BundleFeature(Feature):
         async def extract(self, raw, ctx, entity_id=None):
-            return {"v": raw["good"]}
+            return ExtractionResult.of(entity_id, {"v": raw["good"]})
 
     pipeline = Pipeline(
         source=SourceBundle(good=GoodSource(), flaky=FlakySource()),
@@ -232,14 +233,14 @@ async def demo_name_collision() -> None:
     # happen to be named "EngagementScore".
     class EngagementScore(Feature):  # "team A" version
         async def extract(self, raw, context, entity_id=None):
-            return {"v": "team_A_value"}
+            return ExtractionResult.of(entity_id, {"v": "team_A_value"})
 
     # Rebind same name — identical __name__, different implementation
     _EngagementScore_A = EngagementScore
 
     class EngagementScore(Feature):  # "team B" version  # noqa: F811
         async def extract(self, raw, context, entity_id=None):
-            return {"v": "team_B_value"}
+            return ExtractionResult.of(entity_id, {"v": "team_B_value"})
 
     _EngagementScore_B = EngagementScore
 
@@ -247,8 +248,8 @@ async def demo_name_collision() -> None:
     feat_b = _EngagementScore_B()
 
     store = MemoryStore()
-    await store.awrite(feat_a, "e1", {"v": "team_A_value"})
-    await store.awrite(feat_b, "e1", {"v": "team_B_value"})  # silently overwrites!
+    await store.awrite(feat_a, "e1", ExtractionResult.of("e1", {"v": "team_A_value"}))
+    await store.awrite(feat_b, "e1", ExtractionResult.of("e1", {"v": "team_B_value"}))  # silently overwrites!
 
     result = await store.aread(feat_a, "e1")
     print("  Wrote team_A then team_B for entity 'e1'.")
@@ -282,17 +283,17 @@ async def demo_name_collision() -> None:
         feature_name = "team_a.engagement_score"
 
         async def extract(self, raw, context, entity_id=None):
-            return {"v": "team_A_value"}
+            return ExtractionResult.of(entity_id, {"v": "team_A_value"})
 
     class TeamBScore(Feature):
         feature_name = "team_b.engagement_score"
 
         async def extract(self, raw, context, entity_id=None):
-            return {"v": "team_B_value"}
+            return ExtractionResult.of(entity_id, {"v": "team_B_value"})
 
     safe_store = ModuleAwareStore()
-    await safe_store.awrite(TeamAScore(), "e1", {"v": "team_A_value"})
-    await safe_store.awrite(TeamBScore(), "e1", {"v": "team_B_value"})
+    await safe_store.awrite(TeamAScore(), "e1", ExtractionResult.of("e1", {"v": "team_A_value"}))
+    await safe_store.awrite(TeamBScore(), "e1", ExtractionResult.of("e1", {"v": "team_B_value"}))
     result_a = await safe_store.aread(TeamAScore(), "e1")
     result_b = await safe_store.aread(TeamBScore(), "e1")
     print(f"  After mitigation → TeamA: {result_a}  TeamB: {result_b}")
@@ -330,7 +331,7 @@ async def demo_serial_processing() -> None:
     class IoFeature(Feature):
         async def extract(self, raw, context, entity_id=None):
             await asyncio.sleep(0.005)  # 5 ms simulated async I/O
-            return {"v": 1.0}
+            return ExtractionResult.of(entity_id, {"v": 1.0})
 
     df = pd.DataFrame({"entity_id": [f"e{i}" for i in range(N)], "x": range(N)})
     entity_ids = df["entity_id"].tolist()

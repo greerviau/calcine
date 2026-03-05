@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources import DataFrameSource, SourceBundle
@@ -90,7 +90,7 @@ class UserRiskScore(Feature):
         }
     )
 
-    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         txns = raw["transactions"]  # DataFrame
         txns = txns.drop(columns=["helpful_votes", "category", "review"], errors="ignore")
         profile = raw["profile"]  # Series (one row)
@@ -125,14 +125,14 @@ class UserRiskScore(Feature):
             0.3 * country_r + 0.2 * (1 - plan_w) + 0.2 * (1 - tenure_w) + 0.3 * float(high_velocity)
         )
 
-        return {
+        return ExtractionResult.of(entity_id, {
             "risk_score": round(float(np.clip(risk, 0, 1)), 4),
             "spend_total": round(spend_total, 2),
             "spend_stddev": round(spend_std, 2),
             "txn_count": txn_count,
             "plan": plan,
             "flagged": bool(high_velocity),
-        }
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -169,9 +169,9 @@ async def main() -> None:
 
     print(f"  {report.success_count} OK  |  {report.failure_count} failed")
 
-    # Show distribution
-    scores = [f["risk_score"] for f in report.succeeded.values()]
-    flagged = sum(1 for f in report.succeeded.values() if f["flagged"])
+    # Show distribution (report.succeeded maps entity_id → ExtractionResult)
+    scores = [f.records[eid]["risk_score"] for eid, f in report.succeeded.items()]
+    flagged = sum(1 for eid, f in report.succeeded.items() if f.records[eid]["flagged"])
     print(
         f"\n  risk_score  min={min(scores):.3f}  "
         f"mean={sum(scores) / len(scores):.3f}  max={max(scores):.3f}"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..extraction import ExtractionResult
 from .base import FeatureStore
 
 if TYPE_CHECKING:
@@ -31,12 +32,21 @@ class MemoryStore(FeatureStore):
         self._data: dict[str, dict[str, Any]] = {}
 
     async def awrite(
-        self, feature: Feature, entity_id: str, data: Any, context: dict | None = None
+        self,
+        feature: Feature,
+        entity_id: str,
+        result: ExtractionResult,
+        context: dict | None = None,
     ) -> None:
         key = self._feature_key(feature)
         if key not in self._data:
             self._data[key] = {}
-        self._data[key][entity_id] = data
+        # Write metadata (or tombstone) under entity_id when it isn't already
+        # a record key — ensures aexists(entity_id) is True after any write.
+        if entity_id not in result.records:
+            self._data[key][entity_id] = result.metadata if result.metadata is not None else {}
+        for sub_id, record in result.records.items():
+            self._data[key][sub_id] = record
 
     async def aread(self, feature: Feature, entity_id: str) -> Any:
         key = self._feature_key(feature)

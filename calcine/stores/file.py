@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import StoreError
+from ..extraction import ExtractionResult
 from ..serializers import PickleSerializer, Serializer
 from .base import FeatureStore
 
@@ -23,6 +24,9 @@ class FileStore(FeatureStore):
             {FeatureClassName}/
                 {entity_id}.bin
 
+    Fan-out sub-entities with ``/`` in their IDs (e.g. ``"recording/0"``)
+    are stored in subdirectories automatically (``recording/0.bin``).
+
     Args:
         path: Base directory where feature files are stored.  Created
             automatically on first write.
@@ -32,7 +36,7 @@ class FileStore(FeatureStore):
     Example::
 
         store = FileStore("/tmp/features", serializer=JSONSerializer())
-        store.write(feature, "u1", {"score": 0.92})
+        store.write(feature, "u1", ExtractionResult.of("u1", {"score": 0.92}))
     """
 
     def __init__(self, path: str, serializer: Serializer | None = None) -> None:
@@ -42,9 +46,7 @@ class FileStore(FeatureStore):
     def _entity_path(self, feature: Feature, entity_id: str) -> Path:
         return self.path / self._feature_key(feature) / f"{entity_id}.bin"
 
-    async def awrite(
-        self, feature: Feature, entity_id: str, data: Any, context: dict | None = None
-    ) -> None:
+    async def _awrite_single(self, feature: Feature, entity_id: str, data: Any) -> None:
         path = self._entity_path(feature, entity_id)
         loop = asyncio.get_running_loop()
 
@@ -61,6 +63,21 @@ class FileStore(FeatureStore):
                 entity_id=entity_id,
                 cause=exc,
             ) from exc
+
+    async def awrite(
+        self,
+        feature: Feature,
+        entity_id: str,
+        result: ExtractionResult,
+        context: dict | None = None,
+    ) -> None:
+        # Write metadata (or tombstone) under entity_id when it isn't already
+        # a record key — ensures aexists(entity_id) is True after any write.
+        if entity_id not in result.records:
+            parent = result.metadata if result.metadata is not None else {}
+            await self._awrite_single(feature, entity_id, parent)
+        for sub_id, record in result.records.items():
+            await self._awrite_single(feature, sub_id, record)
 
     async def aread(self, feature: Feature, entity_id: str) -> Any:
         path = self._entity_path(feature, entity_id)

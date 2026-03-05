@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources.base import DataSource
@@ -75,7 +75,7 @@ class UserEngagementFeature(Feature):
         }
     )
 
-    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         spend = raw["total_spend"]
         if spend is None:
             raise ValueError("total_spend is missing — cannot compute engagement features")
@@ -91,11 +91,11 @@ class UserEngagementFeature(Feature):
         else:
             tier = "whale"
 
-        return {
+        return ExtractionResult.of(entity_id, {
             "spend_tier": tier,
             "event_rate": round(event_rate, 4),
             "total_spend": spend,
-        }
+        })
 
 
 # ---------------------------------------------------------------------------

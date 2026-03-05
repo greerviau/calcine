@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources import DataFrameSource
@@ -53,14 +53,14 @@ class ReviewStats(Feature):
         }
     )
 
-    async def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> dict:
+    async def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> ExtractionResult:
         if raw.empty:
             raise ValueError("No reviews found for this entity")
 
         words_per_review = raw["review"].str.split().str.len()
         all_words = " ".join(raw["review"]).split()
 
-        return {
+        return ExtractionResult.of(entity_id, {
             "review_count": int(len(raw)),
             "avg_word_count": float(words_per_review.mean()),
             "vocab_size": int(len(set(all_words))),
@@ -68,7 +68,7 @@ class ReviewStats(Feature):
             "five_star_ratio": float((raw["rating"] == 5).mean()),
             "top_category": str(raw["category"].mode().iloc[0]),
             "total_helpful_votes": int(raw["helpful_votes"].sum()),
-        }
+        })
 
 
 # ---------------------------------------------------------------------------

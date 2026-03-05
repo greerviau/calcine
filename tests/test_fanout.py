@@ -1,4 +1,4 @@
-"""Tests for fan-out extraction (extract_many / FanOutResult)."""
+"""Tests for fan-out extraction via ExtractionResult."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from calcine import FanOutResult, Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.sources.base import DataSource
@@ -18,7 +18,7 @@ from calcine.stores.memory import MemoryStore
 
 
 class SimpleSource(DataSource):
-    """Returns a dict with `segments` list keyed by entity_id."""
+    """Returns a dict keyed by entity_id."""
 
     def __init__(self, data: dict):
         self._data = data
@@ -45,8 +45,8 @@ class SegmentFeature(Feature):
         }
     )
 
-    async def extract_many(self, raw: dict, context: dict, entity_id: str) -> FanOutResult:
-        return FanOutResult(
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+        return ExtractionResult(
             metadata={"sample_rate": raw["sample_rate"], "speaker_id": raw.get("speaker_id")},
             records={
                 f"{entity_id}/{i}": {"rms": seg["rms"], "duration_ms": seg["duration_ms"]}
@@ -54,22 +54,16 @@ class SegmentFeature(Feature):
             },
         )
 
-    async def extract(self, raw, context, entity_id=None):
-        raise NotImplementedError  # pipeline always uses extract_many
-
 
 class NoMetaSegmentFeature(Feature):
     """Fan-out without parent metadata."""
 
     schema = FeatureSchema({"value": types.Float64(nullable=False)})
 
-    async def extract_many(self, raw: dict, context: dict, entity_id: str) -> FanOutResult:
-        return FanOutResult(
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+        return ExtractionResult(
             records={f"{entity_id}/{i}": {"value": v} for i, v in enumerate(raw["values"])}
         )
-
-    async def extract(self, raw, context, entity_id=None):
-        raise NotImplementedError
 
 
 class BadMetaFeature(Feature):
@@ -78,79 +72,54 @@ class BadMetaFeature(Feature):
     parent_schema = FeatureSchema({"count": types.Int64(nullable=False)})
     schema = FeatureSchema({"v": types.Float64(nullable=False)})
 
-    async def extract_many(self, raw: dict, context: dict, entity_id: str) -> FanOutResult:
-        return FanOutResult(
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+        return ExtractionResult(
             metadata={"count": "not-an-int"},  # should fail validation
             records={f"{entity_id}/0": {"v": 1.0}},
         )
 
-    async def extract(self, raw, context, entity_id=None):
-        raise NotImplementedError
-
 
 class BadRecordFeature(Feature):
-    """Fan-out that returns invalid sub-entity records."""
+    """Fan-out that returns an invalid sub-entity record."""
 
     schema = FeatureSchema({"v": types.Float64(nullable=False)})
 
-    async def extract_many(self, raw: dict, context: dict, entity_id: str) -> FanOutResult:
-        return FanOutResult(
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+        return ExtractionResult(
             records={
                 f"{entity_id}/0": {"v": 1.0},
                 f"{entity_id}/1": {"v": "not-a-float"},  # invalid
             }
         )
 
-    async def extract(self, raw, context, entity_id=None):
-        raise NotImplementedError
-
 
 class RaisingFeature(Feature):
-    """Fan-out that raises during extract_many."""
+    """Feature that raises during extract."""
 
-    async def extract_many(self, raw: dict, context: dict, entity_id: str) -> FanOutResult:
+    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         raise ValueError("boom")
 
-    async def extract(self, raw, context, entity_id=None):
-        raise NotImplementedError
-
 
 # ---------------------------------------------------------------------------
-# FanOutResult dataclass
+# ExtractionResult dataclass
 # ---------------------------------------------------------------------------
 
 
-def test_fanout_result_with_metadata():
-    r = FanOutResult(records={"a/0": {"x": 1}}, metadata={"key": "val"})
+def test_extraction_result_with_metadata():
+    r = ExtractionResult(records={"a/0": {"x": 1}}, metadata={"key": "val"})
     assert r.records == {"a/0": {"x": 1}}
     assert r.metadata == {"key": "val"}
 
 
-def test_fanout_result_without_metadata():
-    r = FanOutResult(records={"a/0": {"x": 1}})
+def test_extraction_result_without_metadata():
+    r = ExtractionResult(records={"a/0": {"x": 1}})
     assert r.metadata is None
 
 
-# ---------------------------------------------------------------------------
-# Feature.extract_many detection
-# ---------------------------------------------------------------------------
-
-
-def test_extract_many_detection_on_subclass():
-    """Subclass that overrides extract_many is detectable via MRO check."""
-    feat = SegmentFeature()
-    assert type(feat).extract_many is not Feature.extract_many
-
-
-def test_extract_many_detection_on_base():
-    """Base Feature.extract_many points to the base implementation."""
-
-    class PlainFeature(Feature):
-        async def extract(self, raw, context, entity_id=None):
-            return raw
-
-    feat = PlainFeature()
-    assert type(feat).extract_many is Feature.extract_many
+def test_extraction_result_of_convenience():
+    r = ExtractionResult.of("u1", {"score": 0.9})
+    assert r.records == {"u1": {"score": 0.9}}
+    assert r.metadata is None
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +178,7 @@ async def test_fanout_basic_generate():
 
 
 @pytest.mark.asyncio
-async def test_fanout_report_stores_fanout_result():
+async def test_fanout_report_stores_extraction_result():
     store = MemoryStore()
     pipeline = Pipeline(
         source=SimpleSource(SOURCE_DATA),
@@ -217,7 +186,7 @@ async def test_fanout_report_stores_fanout_result():
         store=store,
     )
     report = await pipeline.agenerate(entity_ids=["rec1"])
-    assert isinstance(report.succeeded["rec1"], FanOutResult)
+    assert isinstance(report.succeeded["rec1"], ExtractionResult)
     assert "rec1/0" in report.succeeded["rec1"].records
 
 
@@ -247,9 +216,9 @@ async def test_fanout_no_metadata():
     report = await pipeline.agenerate(entity_ids=["e1"])
     assert report.success_count == 1
 
-    # Tombstone written under parent key
+    # Tombstone written under parent key for overwrite=False support
     parent_val = await store.aread(NoMetaSegmentFeature(), "e1")
-    assert parent_val == {}  # sentinel for overwrite=False
+    assert parent_val == {}
 
     sub0 = await store.aread(NoMetaSegmentFeature(), "e1/0")
     assert sub0 == {"value": 1.0}
@@ -326,7 +295,7 @@ async def test_fanout_bad_record_fails_entity():
 
 
 @pytest.mark.asyncio
-async def test_fanout_extract_many_raises_is_caught():
+async def test_fanout_extract_raises_is_caught():
     data = {"e1": {}}
     store = MemoryStore()
     pipeline = Pipeline(
@@ -376,30 +345,34 @@ async def test_alist_entities_empty_store():
 def test_list_entities_sync():
     store = MemoryStore()
     feature = NoMetaSegmentFeature()
-    store.write(feature, "e1/0", {"value": 1.0})
-    store.write(feature, "e1/1", {"value": 2.0})
+    # Write via ExtractionResult so the store sees the correct structure
+    store.write(
+        feature,
+        "e1",
+        ExtractionResult(records={"e1/0": {"value": 1.0}, "e1/1": {"value": 2.0}}),
+    )
 
     ids = store.list_entities(feature, prefix="e1/")
     assert set(ids) == {"e1/0", "e1/1"}
 
 
 # ---------------------------------------------------------------------------
-# FeatureStore.awrite_fanout default behaviour
+# awrite with ExtractionResult directly
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_write_fanout_writes_metadata_and_records():
+async def test_awrite_writes_metadata_and_records():
     store = MemoryStore()
     feature = SegmentFeature()
-    result = FanOutResult(
+    result = ExtractionResult(
         metadata={"sample_rate": 8000, "speaker_id": "bob"},
         records={
             "r/0": {"rms": 0.3, "duration_ms": 10.0},
             "r/1": {"rms": 0.4, "duration_ms": 20.0},
         },
     )
-    await store.awrite_fanout(feature, "r", result)
+    await store.awrite(feature, "r", result)
 
     assert await store.aread(feature, "r") == {"sample_rate": 8000, "speaker_id": "bob"}
     assert await store.aread(feature, "r/0") == {"rms": 0.3, "duration_ms": 10.0}
@@ -407,18 +380,36 @@ async def test_write_fanout_writes_metadata_and_records():
 
 
 @pytest.mark.asyncio
-async def test_write_fanout_none_metadata_writes_tombstone():
+async def test_awrite_none_metadata_writes_tombstone():
     store = MemoryStore()
     feature = NoMetaSegmentFeature()
-    result = FanOutResult(records={"e/0": {"value": 5.0}})
-    await store.awrite_fanout(feature, "e", result)
+    result = ExtractionResult(records={"e/0": {"value": 5.0}})
+    await store.awrite(feature, "e", result)
 
     assert await store.aread(feature, "e") == {}
     assert await store.aexists(feature, "e")
 
 
+@pytest.mark.asyncio
+async def test_awrite_single_record_no_tombstone():
+    """For single-record features, entity_id is the record key — no extra tombstone write."""
+    store = MemoryStore()
+
+    class SingleFeature(Feature):
+        async def extract(self, raw, context, entity_id=None):
+            return ExtractionResult.of(entity_id, {"v": raw})
+
+    feature = SingleFeature()
+    result = ExtractionResult.of("u1", {"v": 42})
+    await store.awrite(feature, "u1", result)
+
+    assert await store.aread(feature, "u1") == {"v": 42}
+    # Only one entry — no spurious tombstone
+    assert await store.alist_entities(feature) == ["u1"]
+
+
 # ---------------------------------------------------------------------------
-# Concurrency and batch_size: fan-out routing
+# Concurrency and batch_size
 # ---------------------------------------------------------------------------
 
 
@@ -444,8 +435,8 @@ async def test_fanout_concurrent_generate():
 
 
 @pytest.mark.asyncio
-async def test_fanout_batch_size_falls_back_to_per_entity():
-    """Fan-out features ignore batch_size and still use extract_many per entity."""
+async def test_fanout_with_batch_size():
+    """Fan-out features work correctly when batch_size > 1."""
     store = MemoryStore()
     pipeline = Pipeline(
         source=SimpleSource(SOURCE_DATA),
@@ -463,7 +454,6 @@ async def test_fanout_batch_size_falls_back_to_per_entity():
 
 @pytest.mark.asyncio
 async def test_fanout_batch_size_with_concurrency():
-    """batch_size + concurrency together still route fan-out correctly."""
     data = {
         f"r{i}": {
             "sample_rate": 100,

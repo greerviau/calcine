@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions import StoreError
+from ..extraction import ExtractionResult
 from .base import FeatureStore
 
 if TYPE_CHECKING:
@@ -58,7 +59,11 @@ class ParquetStore(FeatureStore):
             ) from exc
 
     async def awrite(
-        self, feature: Feature, entity_id: str, data: Any, context: dict | None = None
+        self,
+        feature: Feature,
+        entity_id: str,
+        result: ExtractionResult,
+        context: dict | None = None,
     ) -> None:
         self._check_deps()
         import pandas as pd
@@ -67,17 +72,33 @@ class ParquetStore(FeatureStore):
         loop = asyncio.get_running_loop()
 
         def _write() -> None:
-            new_row: dict[str, Any] = {"entity_id": entity_id}
-            if isinstance(data, dict):
-                new_row.update(data)
-            else:
-                new_row["value"] = data
+            # Collect all (sub_id, record) pairs from the ExtractionResult.
+            # For single-record features, result.records == {entity_id: value}.
+            # For fan-out features, result.records contains sub-entity entries;
+            # in that case also write a metadata/tombstone row under entity_id.
+            rows: list[dict[str, Any]] = []
+            if entity_id not in result.records:
+                parent = result.metadata if result.metadata is not None else {}
+                row: dict[str, Any] = {"entity_id": entity_id}
+                if isinstance(parent, dict):
+                    row.update(parent)
+                else:
+                    row["value"] = parent
+                rows.append(row)
+            for sub_id, record in result.records.items():
+                row = {"entity_id": sub_id}
+                if isinstance(record, dict):
+                    row.update(record)
+                else:
+                    row["value"] = record
+                rows.append(row)
 
-            new_df = pd.DataFrame([new_row])
+            new_df = pd.DataFrame(rows)
+            written_ids = {r["entity_id"] for r in rows}
 
             if path.exists():
                 existing = pd.read_parquet(path)
-                existing = existing[existing["entity_id"] != entity_id]
+                existing = existing[~existing["entity_id"].isin(written_ids)]
                 combined = pd.concat([existing, new_df], ignore_index=True)
             else:
                 combined = new_df

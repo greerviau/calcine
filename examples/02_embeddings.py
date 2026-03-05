@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from calcine import Pipeline
+from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
 from calcine.serializers import NumpySerializer
@@ -96,9 +96,9 @@ def _trigram_embed(text: str) -> np.ndarray:
 class DocumentEmbedding(Feature):
     """64-dim L2-normalised document embedding.
 
-    Returns a raw ndarray (not a dict).  The single-field schema validates
-    the array shape and dtype directly, and NumpySerializer stores it as a
-    compact binary blob — no dict wrapper needed.
+    Stores a raw ndarray as the feature value.  The single-field schema
+    validates the array shape and dtype directly, and NumpySerializer stores
+    it as a compact binary blob — no dict wrapper needed.
     """
 
     # Single-field schema: validates a raw ndarray value directly
@@ -106,12 +106,12 @@ class DocumentEmbedding(Feature):
         {"embedding": types.NDArray(shape=(EMBED_DIM,), dtype="float32", nullable=False)}
     )
 
-    async def extract(self, raw: str, context: dict, entity_id: str | None = None) -> np.ndarray:
+    async def extract(self, raw: str, context: dict, entity_id: str | None = None) -> ExtractionResult:
         result = _trigram_embed(raw)
         norm = float(np.linalg.norm(result))
         if norm > 0:
             result = (result / norm).astype(np.float32)
-        return result
+        return ExtractionResult.of(entity_id, result)
 
 
 # ---------------------------------------------------------------------------
