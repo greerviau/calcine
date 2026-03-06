@@ -55,7 +55,7 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [ ] **SQLite store** — A `SQLiteStore(path)` that persists features to a single SQLite file keyed by `(feature_name, entity_id)`. Persistent, zero-config, no directory explosion, portable. The right default persistent store; `FileStore` should be de-emphasized in docs in favour of this once it exists.
 
-- [ ] **`GenerationReport` per-phase timing** — Track wall time for source read, extract, and store write separately per entity. Surface aggregates (p50/p95/max per phase) in `GenerationReport`. This turns calcine from a pipeline runner into a bottleneck analysis tool — a real reason to adopt it over a hand-rolled loop.
+- [x] **`GenerationReport` per-phase timing** — Track wall time for source read, extract, and store write separately per entity. Surface aggregates (p50/p95/max per phase) in `GenerationReport`. This turns calcine from a pipeline runner into a bottleneck analysis tool — a real reason to adopt it over a hand-rolled loop.
 
 - [ ] **Store bulk read + DataFrame export** — Add `read_many(feature, entity_ids) -> list[Any]` for validated bulk retrieval, and `to_dataframe(feature, entity_ids) -> pd.DataFrame` for ML-ready export with correct dtypes derived from the schema. Both sync by default with `aread_many` / `ato_dataframe` async variants. Without this, the typed contract story only holds for single-entity lookups; training workflows have no clean path through the store. `read_many` also supersedes the existing `retrieve_batch` on `Pipeline`.
 

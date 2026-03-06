@@ -20,17 +20,12 @@ backend, with no lock-in on format or framework.
 ## Highlights
 
 - **Sync-first interface** — `pipeline.generate()` and `store.read()` are plain synchronous calls by default; async variants (`agenerate`, `aread`, …) are opt-in for callers already in an async context
-- **Type-safe schemas** — validate floats, ints, strings, booleans, categoricals,
-  ndarrays, and bytes before anything hits the store
-- **Composable sources** — `SourceBundle` fans out to multiple sources concurrently;
-  combine DataFrames, files, HTTP, or anything custom
-- **Batteries included** — file, DataFrame, and HTTP sources out of the box;
-  memory, file, and Parquet stores; pluggable serializers
-- **Fan-out extraction** — `extract()` returns an `ExtractionResult` with one or
-  more records; parent metadata and sub-entities are stored independently
-  and discovered via `store.list_entities(feature, prefix="…")`
-- **Never crashes on partial failure** — `generate()` captures every per-entity
-  error in a `GenerationReport`; valid entities are always written
+- **Type-safe schemas** — validate scalars, strings, categoricals, ndarrays, bytes, lists, and dicts before anything hits the store; the same schema validates on read, making it a typed contract between feature producers and consumers
+- **Detailed reporting** — `GenerationReport` tracks successes, failures, and skips with per-phase timing (read / extract / write); `timing_summary()` surfaces p50/p95/max per phase so you can pinpoint bottlenecks; `error_summary()` groups failures by message; exports to a pandas DataFrame
+- **Fan-out extraction** — `extract()` returns an `ExtractionResult` with one or many records; each sub-entity is stored, validated, and retrievable independently
+- **Composable sources** — `SourceBundle` reads from multiple sources concurrently and delivers a single `dict` to `extract`; combine any data origins without changing the pipeline
+- **Never crashes on partial failure** — `generate()` isolates every per-entity error; valid entities are always written even when others fail
+- **Executor support** — offload CPU-bound extraction to thread or process pools via `executor=`; store writes always remain in the main process so all store backends work correctly
 - **No required pandas** — the core only needs `numpy`; pandas is optional
 
 ---
@@ -93,9 +88,15 @@ pipeline = Pipeline(
     store=MemoryStore(),
 )
 
-# All 1 000 reads fire concurrently; failures are isolated per entity
+# Concurrent reads; failures are isolated per entity
 report = pipeline.generate(entity_ids=user_ids, concurrency=32)
-print(report)   # GenerationReport(succeeded=997, failed=3, skipped=0)
+print(report)
+# GenerationReport(entities=997, records=997, failed=3, skipped=0, duration=1.24s)
+
+# Identify bottlenecks across read / extract / write phases
+summary = report.timing_summary()
+print(f"p95 read:    {summary['read']['p95']*1000:.1f} ms")
+print(f"p95 extract: {summary['extract']['p95']*1000:.1f} ms")
 
 # Re-run later — already-stored entities are skipped automatically
 pipeline.generate(entity_ids=new_user_ids, overwrite=False)
@@ -149,7 +150,7 @@ When one source entity produces multiple independently-stored sub-entity records
 from calcine import ExtractionResult
 
 class AudioSegmentFeature(Feature):
-    parent_schema = FeatureSchema({
+    metadata_schema = FeatureSchema({
         "sample_rate": types.Int64(nullable=False),
         "speaker_id":  types.String(nullable=True),
     })
@@ -192,6 +193,8 @@ schema = FeatureSchema({
     "label":     types.String(nullable=True),
     "active":    types.Boolean(),
     "count":     types.Int64(nullable=False),
+    "tags":      types.List(item_type=types.String()),
+    "scores":    types.Dict(key_type=types.String(), value_type=types.Float64()),
     "payload":   types.Bytes(),
     "anything":  types.Any(),
 })
@@ -208,45 +211,16 @@ See [`docs/schema.md`](docs/schema.md) for the full reference.
 
 ---
 
-## Available components
+## Built-in components
 
-### Sources
-
-| Class | Description |
-|-------|-------------|
-| `FileSource(path)` | Read bytes from a single file |
-| `DirectorySource(path, pattern)` | Stream bytes from files matching a glob |
-| `DataFrameSource(df, entity_col)` | Filter a pandas DataFrame by entity |
-| `HTTPSource(url_template, ...)` | Async HTTP GET (requires `[http]`) |
-| `SourceBundle(**sources)` | Read multiple sources concurrently |
-
-### Stores
-
-| Class | Description |
-|-------|-------------|
-| `MemoryStore` | Dict-backed, no I/O — for tests and prototyping |
-| `FileStore(path, serializer)` | One file per entity per feature |
-| `ParquetStore(path)` | Parquet files partitioned by feature (requires `[parquet]`) |
-
-### Serializers (for FileStore)
-
-| Class | Best for |
-|-------|----------|
-| `PickleSerializer` | Any Python object (default) |
-| `JSONSerializer` | Dict / list / primitive features |
-| `NumpySerializer` | `numpy` arrays |
+calcine ships with reference sources, stores, and serializers for common patterns.
+See [`docs/sources.md`](docs/sources.md) and [`docs/stores.md`](docs/stores.md).
 
 ---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [`docs/architecture.md`](docs/architecture.md) | Design rationale and core decisions |
-| [`docs/extending.md`](docs/extending.md) | Adding custom sources, stores, and schema types |
-| [`docs/schema.md`](docs/schema.md) | Full schema type reference |
-| [`examples/README.md`](examples/README.md) | Guide to the runnable examples |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup and PR process |
+See [`docs/`](docs/README.md) for the full documentation index.
 
 ---
 
@@ -256,8 +230,6 @@ See [`docs/schema.md`](docs/schema.md) for the full reference.
 uv pip install -e ".[dev]"
 pytest
 ```
-
-189 tests, covering the pipeline, schema, fan-out extraction, all built-in sources and stores.
 
 ---
 
@@ -270,13 +242,13 @@ calcine/
 ├── schema.py          FeatureSchema + type system
 ├── serializers.py     Serializer ABC + Pickle / JSON / Numpy
 ├── exceptions.py      SourceError, StoreError, SchemaViolationError
-├── sources/           DataSource ABC + FileSource, DataFrameSource, HTTPSource, SourceBundle
-├── features/          Feature ABC (extract)
-└── stores/            FeatureStore ABC + MemoryStore, FileStore, ParquetStore
+├── sources/           DataSource ABC + built-in sources
+├── features/          Feature ABC
+└── stores/            FeatureStore ABC + built-in stores
 
-tests/                 189 tests mirroring the calcine structure
-examples/              5 runnable end-to-end scripts + generated datasets
-docs/                  Architecture, extension guide, schema reference
+tests/                 test suite mirroring the calcine structure
+examples/              runnable end-to-end scripts + generated datasets
+docs/                  architecture, extension guide, schema reference
 ```
 
 ---
