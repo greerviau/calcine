@@ -2,6 +2,7 @@
 
 | Document | Description |
 |----------|-------------|
+| [`api.md`](api.md) | Full API reference: Pipeline, Feature, FeatureStore, DataSource |
 | [`architecture.md`](architecture.md) | Design rationale and core decisions |
 | [`generation-report.md`](generation-report.md) | GenerationReport reference |
 | [`schema.md`](schema.md) | Schema type reference |
