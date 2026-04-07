@@ -25,7 +25,7 @@ def sample_df():
 @pytest.mark.asyncio
 async def test_dataframe_source_basic(sample_df):
     source = DataFrameSource(sample_df)
-    result = await source.read(entity_id="u1")
+    result = await source.aread(entity_id="u1")
     assert len(result) == 2
     assert sorted(result["amount"].tolist()) == [10.0, 20.0]
 
@@ -33,7 +33,7 @@ async def test_dataframe_source_basic(sample_df):
 @pytest.mark.asyncio
 async def test_dataframe_source_single_row(sample_df):
     source = DataFrameSource(sample_df)
-    result = await source.read(entity_id="u2")
+    result = await source.aread(entity_id="u2")
     assert len(result) == 1
     assert result.iloc[0]["amount"] == 15.0
 
@@ -41,7 +41,7 @@ async def test_dataframe_source_single_row(sample_df):
 @pytest.mark.asyncio
 async def test_dataframe_source_missing_entity_returns_empty(sample_df):
     source = DataFrameSource(sample_df)
-    result = await source.read(entity_id="u_missing")
+    result = await source.aread(entity_id="u_missing")
     assert result.empty
 
 
@@ -49,14 +49,14 @@ async def test_dataframe_source_missing_entity_returns_empty(sample_df):
 async def test_dataframe_source_no_entity_id_raises(sample_df):
     source = DataFrameSource(sample_df)
     with pytest.raises(SourceError):
-        await source.read()
+        await source.aread()
 
 
 @pytest.mark.asyncio
 async def test_dataframe_source_custom_entity_col():
     df = pd.DataFrame({"user": ["a", "b"], "val": [1, 2]})
     source = DataFrameSource(df, entity_col="user")
-    result = await source.read(entity_id="a")
+    result = await source.aread(entity_id="a")
     assert len(result) == 1
     assert result.iloc[0]["val"] == 1
 
@@ -65,7 +65,7 @@ async def test_dataframe_source_custom_entity_col():
 async def test_dataframe_source_bad_entity_col_raises(sample_df):
     source = DataFrameSource(sample_df, entity_col="nonexistent")
     with pytest.raises(SourceError):
-        await source.read(entity_id="u1")
+        await source.aread(entity_id="u1")
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ async def test_file_source_reads_bytes():
         path = f.name
     try:
         source = FileSource(path)
-        data = await source.read()
+        data = await source.aread()
         assert data == b"hello calcine"
     finally:
         os.unlink(path)
@@ -90,7 +90,7 @@ async def test_file_source_reads_bytes():
 async def test_file_source_missing_file_raises():
     source = FileSource("/nonexistent/path/definitely_not_here.bin")
     with pytest.raises(SourceError):
-        await source.read()
+        await source.aread()
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,7 @@ async def test_file_source_accepts_entity_id_kwarg():
         path = f.name
     try:
         source = FileSource(path)
-        data = await source.read(entity_id="does_not_matter")
+        data = await source.aread(entity_id="does_not_matter")
         assert data == b"data"
     finally:
         os.unlink(path)
@@ -120,7 +120,7 @@ async def test_directory_source_read_all():
         Path(tmpdir, "file_c.txt").write_bytes(b"gamma")
 
         source = DirectorySource(tmpdir, pattern="*.txt")
-        files = await source.read()
+        files = await source.aread()
 
         assert len(files) == 3
         assert set(files) == {b"alpha", b"beta", b"gamma"}
@@ -133,7 +133,7 @@ async def test_directory_source_pattern_filters():
         Path(tmpdir, "exclude.bin").write_bytes(b"no")
 
         source = DirectorySource(tmpdir, pattern="*.txt")
-        files = await source.read()
+        files = await source.aread()
 
         assert files == [b"yes"]
 
@@ -156,7 +156,7 @@ async def test_directory_source_stream():
 async def test_directory_source_empty_dir():
     with tempfile.TemporaryDirectory() as tmpdir:
         source = DirectorySource(tmpdir, pattern="*.txt")
-        files = await source.read()
+        files = await source.aread()
         assert files == []
 
 
@@ -171,28 +171,28 @@ class FixedSource(DataSource):
     def __init__(self, value):
         self.value = value
 
-    async def read(self, **kwargs):
+    def read(self, **kwargs):
         return self.value
 
 
 class EchoEntitySource(DataSource):
     """Test source that echoes back the entity_id it was called with."""
 
-    async def read(self, entity_id=None, **kwargs):
+    def read(self, entity_id=None, **kwargs):
         return entity_id
 
 
 @pytest.mark.asyncio
 async def test_bundle_returns_named_dict():
     source = SourceBundle(a=FixedSource(1), b=FixedSource(2), c=FixedSource(3))
-    result = await source.read()
+    result = await source.aread()
     assert result == {"a": 1, "b": 2, "c": 3}
 
 
 @pytest.mark.asyncio
 async def test_bundle_forwards_kwargs_to_all_sources():
     source = SourceBundle(x=EchoEntitySource(), y=EchoEntitySource())
-    result = await source.read(entity_id="u42")
+    result = await source.aread(entity_id="u42")
     assert result == {"x": "u42", "y": "u42"}
 
 
@@ -202,7 +202,7 @@ async def test_bundle_mixed_source_types(sample_df):
         frame=DataFrameSource(sample_df),
         constant=FixedSource({"config": True}),
     )
-    result = await source.read(entity_id="u1")
+    result = await source.aread(entity_id="u1")
     assert len(result["frame"]) == 2  # two rows for u1
     assert result["constant"] == {"config": True}
 
@@ -210,7 +210,7 @@ async def test_bundle_mixed_source_types(sample_df):
 @pytest.mark.asyncio
 async def test_bundle_single_source():
     source = SourceBundle(only=FixedSource("solo"))
-    result = await source.read()
+    result = await source.aread()
     assert result == {"only": "solo"}
 
 

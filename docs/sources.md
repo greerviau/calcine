@@ -21,7 +21,8 @@ source = DataFrameSource(df, entity_col="entity_id")
 ```
 
 `entity_col` defaults to `"entity_id"`. `read()` returns the filtered
-sub-DataFrame for the given entity. Raises `SourceError` if no rows match.
+sub-DataFrame for the given entity. Returns an empty DataFrame (not an error)
+if no rows match.
 
 ---
 
@@ -42,31 +43,18 @@ encodes the full dataset and the feature slices it internally.
 
 ## DirectorySource
 
-Reads one file per entity from a directory, matching filenames with a pattern.
+Reads all files matching a glob pattern from a directory and returns their
+contents as a `list[bytes]`, sorted by filename.
 
 ```python
 from calcine.sources import DirectorySource
 
-source = DirectorySource("/data/audio/", pattern="{entity_id}.wav")
+source = DirectorySource("/data/audio/", pattern="*.wav")
 ```
 
-Returns `bytes` for the matched file. Raises `SourceError` if no file matches
-the pattern for a given entity.
-
----
-
-## HTTPSource
-
-Makes an async HTTP GET request per entity. Requires `pip install "calcine[http]"`.
-
-```python
-from calcine.sources import HTTPSource
-
-source = HTTPSource(url_template="https://api.example.com/users/{entity_id}")
-```
-
-The URL template is formatted with `entity_id`. Returns the response body as
-`bytes`. Raises `SourceError` on non-2xx status codes.
+Also supports streaming via `async for chunk in source.stream()` — each
+file is yielded individually, which avoids loading all files into memory at
+once for large directories.
 
 ---
 

@@ -36,30 +36,66 @@ The clearest way to think about which concern belongs where:
 
 ## Async convention
 
-calcine uses sync as the default public interface. The overwhelming majority of
-calcine usage — batch jobs, training scripts, Airflow DAGs, DataLoader workers —
-is synchronous. Async is the right internal mechanism for concurrency and
-fan-out I/O, but should not be imposed on callers who don't need it.
+calcine is designed so that **you write sync, and the framework handles async**.
 
-**Convention:** sync methods are the default; async variants are opt-in using
-the `a`-prefix:
+### Implementing components
+
+Override the synchronous methods — `read` on `DataSource`, and `read` / `write`
+/ `exists` / `delete` on `FeatureStore`.  The framework runs these in a thread
+executor so they never block the event loop:
+
+```python
+class MyDBSource(DataSource):
+    def read(self, entity_id: str, **kwargs):
+        return self.conn.execute("SELECT * FROM t WHERE id = ?", (entity_id,)).fetchall()
+
+class MyStore(FeatureStore):
+    def read(self, feature, entity_id):
+        return self.db.get(self._feature_key(feature), entity_id)
+
+    def write(self, feature, entity_id, result, context=None):
+        for sub_id, record in result.records.items():
+            self.db.set(self._feature_key(feature), sub_id, record)
+```
+
+For **natively async backends** (async database drivers, async HTTP clients),
+override the `a`-prefixed methods instead (`aread`, `awrite`, `aexists`,
+`adelete`).  These are called directly by the pipeline without going through the
+executor:
+
+```python
+class AsyncRedisStore(FeatureStore):
+    async def aread(self, feature, entity_id):
+        raw = await self.redis.get(f"{self._feature_key(feature)}:{entity_id}")
+        if raw is None:
+            raise KeyError(entity_id)
+        return pickle.loads(raw)
+
+    async def awrite(self, feature, entity_id, result, context=None):
+        for sub_id, record in result.records.items():
+            await self.redis.set(f"{self._feature_key(feature)}:{sub_id}", pickle.dumps(record))
+```
+
+### Calling the public API
+
+The pipeline and store both expose sync and async variants.  Sync is the
+default for batch scripts, training jobs, and Airflow DAGs.  Async is available
+for serving contexts (FastAPI, async task workers) or when you're already inside
+an event loop:
 
 ```python
 # Sync — default, works everywhere
 report = pipeline.generate(entity_ids=ids, concurrency=32)
-value  = store.read(MyFeature, entity_id)
-values = store.read_many(MyFeature, entity_ids)
+value  = store.read(feature, entity_id)
 
-# Async — opt-in for callers already in an async context
+# Async — opt-in when already in an async context
 report = await pipeline.agenerate(entity_ids=ids, concurrency=32)
-value  = await store.aread(MyFeature, entity_id)
+value  = await store.aread(feature, entity_id)
 ```
 
-Async remains first-class where it genuinely matters: `SourceBundle` uses
-`asyncio.gather` to fan out concurrent I/O across sources, and async serving
-contexts (FastAPI, async task workers) use the `a`-prefixed methods naturally.
-The internal implementation is async throughout; this is purely a public API
-ergonomics decision.
+`SourceBundle` is the one place where async is load-bearing regardless of user
+choice: it uses `asyncio.gather` to fan out reads across all sub-sources
+concurrently.  This is why it overrides `aread` directly rather than `read`.
 
 ---
 
@@ -277,7 +313,7 @@ segments = store.read_many(AudioSegmentFeature, sub_ids)
 Serializers are an implementation detail of `FileStore` — they are not part of
 the `FeatureStore` interface. This means:
 
-- `MemoryStore` and `ParquetStore` have no serializer concept
+- `MemoryStore` has no serializer concept
 - `FileStore` can accept any `Serializer` without changing the `FeatureStore` API
 - Users can add custom serializers (e.g. MessagePack, Arrow IPC) without
   touching any framework code

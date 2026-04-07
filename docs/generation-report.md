@@ -112,7 +112,7 @@ Columns:
 | `record_count` | `int \| None` | Records written; `None` for failed/skipped |
 | `error` | `str \| None` | Errors joined by `"; "`; `None` for succeeded/skipped |
 
-Requires pandas (`pip install calcine[parquet]`).
+Requires pandas (included as a core dependency).
 
 > **Note:** Succeeded rows only appear when `store_results=True` was used during
 > `generate()`. If `store_results=False`, `report.succeeded` is empty and

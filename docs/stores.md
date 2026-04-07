@@ -40,23 +40,6 @@ Directory structure: `<path>/<FeatureName>/<entity_id>.<ext>`
 
 ---
 
-## ParquetStore
-
-Stores features in Parquet files, one file per feature class. Requires
-`pip install "calcine[parquet]"`.
-
-```python
-from calcine.stores import ParquetStore
-
-store = ParquetStore("/data/features/")
-```
-
-Well-suited for tabular dict features. Each write currently reloads and
-rewrites the full Parquet file — see the TODO for the planned append
-optimization.
-
----
-
 ## Serializers (for FileStore)
 
 Serializers control how feature values are converted to and from bytes in

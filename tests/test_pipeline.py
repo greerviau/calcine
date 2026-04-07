@@ -280,13 +280,13 @@ async def test_generate_serial_within_partition():
     source_map.update({f"p1_e{i}": f"p1_e{i}" for i in range(3)})
 
     class MappedSource(DataFrameSource):
-        async def read(self, entity_id=None, **kwargs):
+        def read(self, entity_id=None, **kwargs):
             return entity_id  # raw is just the entity_id string
 
     from calcine.sources.base import DataSource
 
     class EchoSource(DataSource):
-        async def read(self, entity_id=None, **kwargs):
+        def read(self, entity_id=None, **kwargs):
             return entity_id
 
     pipeline = Pipeline(
@@ -336,7 +336,7 @@ async def test_generate_explicit_partitions_serial_within_group():
     from calcine.sources.base import DataSource
 
     class EchoSource(DataSource):
-        async def read(self, entity_id=None, **kwargs):
+        def read(self, entity_id=None, **kwargs):
             return entity_id
 
     processed: list[str] = []
@@ -1380,7 +1380,7 @@ class ContextCapturingSource(DataSource):
         self._df = df
         self.read_contexts: dict[str, Any] = {}
 
-    async def read(
+    def read(
         self, entity_id: str | None = None, context: dict | None = None, **kwargs: Any
     ) -> pd.DataFrame:
         self.read_contexts[entity_id] = context

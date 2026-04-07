@@ -23,7 +23,7 @@ class SimpleSource(DataSource):
     def __init__(self, data: dict):
         self._data = data
 
-    async def read(self, entity_id: str, context: dict) -> dict:
+    def read(self, entity_id: str, context: dict) -> dict:
         if entity_id not in self._data:
             raise KeyError(entity_id)
         return self._data[entity_id]

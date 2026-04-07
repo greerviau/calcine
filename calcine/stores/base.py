@@ -19,17 +19,15 @@ class FeatureStore(ABC):
     All operations are keyed by ``(feature, entity_id)`` where the feature
     type name is used as the namespace.
 
-    Only ``aread`` is abstract — subclasses must implement it.  The remaining
-    operations (``awrite``, ``aexists``, ``adelete``) have default implementations
-    that raise ``NotImplementedError``, so read-only stores (e.g. a production
-    serving layer that you can query but not write to) only need to override
-    ``aread``.  Full read-write stores should override all four.
+    Implement the synchronous methods (``read``, ``write``, ``exists``,
+    ``delete``).  The framework calls the async variants (``aread``,
+    ``awrite``, ``aexists``, ``adelete``) internally; by default these run
+    your sync implementations in a thread executor.
 
-    Async methods (``aread``, ``awrite``, ``aexists``, ``adelete``) are the
-    implementation interface.  Sync wrappers (``read``, ``write``, ``exists``,
-    ``delete``) are provided for use outside an async context.
+    For natively async backends (e.g. async database clients), override the
+    async methods directly instead.
 
-    ``awrite`` always receives an :class:`~calcine.ExtractionResult`.  For
+    ``write`` always receives an :class:`~calcine.ExtractionResult`.  For
     single-record features, ``result.records`` contains exactly one entry keyed
     by ``entity_id``.  For fan-out features, ``result.records`` contains the
     sub-entity entries and ``result.metadata`` (if set) is stored under
@@ -41,8 +39,8 @@ class FeatureStore(ABC):
     Minimal read-only example::
 
         class RemoteFeatureStore(FeatureStore):
-            async def aread(self, feature, entity_id):
-                return await fetch_from_remote(feature, entity_id)
+            def read(self, feature, entity_id):
+                return fetch_from_remote(feature, entity_id)
 
     Full read-write example::
 
@@ -50,66 +48,53 @@ class FeatureStore(ABC):
             def __init__(self, redis_client):
                 self.redis = redis_client
 
-            async def awrite(self, feature, entity_id, result, context=None):
-                # Write metadata / tombstone under parent key
+            def write(self, feature, entity_id, result, context=None):
                 if entity_id not in result.records:
                     parent = result.metadata if result.metadata is not None else {}
                     key = f"{self._feature_key(feature)}:{entity_id}"
-                    await self.redis.set(key, pickle.dumps(parent))
-                # Write each record
+                    self.redis.set(key, pickle.dumps(parent))
                 for sub_id, record in result.records.items():
                     key = f"{self._feature_key(feature)}:{sub_id}"
-                    await self.redis.set(key, pickle.dumps(record))
+                    self.redis.set(key, pickle.dumps(record))
 
-            async def aread(self, feature, entity_id):
+            def read(self, feature, entity_id):
                 key = f"{self._feature_key(feature)}:{entity_id}"
-                raw = await self.redis.get(key)
+                raw = self.redis.get(key)
                 if raw is None:
                     raise KeyError(key)
                 return pickle.loads(raw)
 
-            async def aexists(self, feature, entity_id):
+            def exists(self, feature, entity_id):
                 key = f"{self._feature_key(feature)}:{entity_id}"
-                return bool(await self.redis.exists(key))
+                return bool(self.redis.exists(key))
+
+            def delete(self, feature, entity_id):
+                key = f"{self._feature_key(feature)}:{entity_id}"
+                if not self.redis.delete(key):
+                    raise KeyError(key)
+
+    For a natively async backend, override the async methods instead::
+
+        class AsyncRedisStore(FeatureStore):
+            async def awrite(self, feature, entity_id, result, context=None):
+                ...
+
+            async def aread(self, feature, entity_id):
+                ...
+
+            async def aexists(self, feature, entity_id):
+                ...
 
             async def adelete(self, feature, entity_id):
-                key = f"{self._feature_key(feature)}:{entity_id}"
-                if not await self.redis.delete(key):
-                    raise KeyError(key)
+                ...
     """
 
-    async def awrite(
-        self,
-        feature: Feature,
-        entity_id: str,
-        result: ExtractionResult,
-        context: dict | None = None,
-    ) -> None:
-        """Persist an extraction result for a source entity.
-
-        Writes metadata (or a ``{}`` tombstone) under ``entity_id`` when
-        ``entity_id`` is not already a key in ``result.records``, then writes
-        each record in ``result.records`` under its own key.  This ensures
-        ``aexists(feature, entity_id)`` returns ``True`` after any write,
-        enabling ``overwrite=False`` to work correctly for both single-record
-        and fan-out features.
-
-        Args:
-            feature: The ``Feature`` instance (class name used as namespace).
-            entity_id: Source entity identifier (parent write key).
-            result: :class:`~calcine.ExtractionResult` from ``Feature.extract``.
-            context: The pipeline context dict at write time.  Implementations
-                may use this for routing (e.g. sharding writes by region) while
-                keeping ``aread`` context-free.  Ignored by default.
-
-        Raises:
-            NotImplementedError: If this store is read-only.
-            StoreError: If the write operation fails.
-        """
-        raise NotImplementedError(f"{type(self).__name__} does not support write operations.")
+    # ------------------------------------------------------------------
+    # Sync implementation interface — override these
+    # ------------------------------------------------------------------
 
     @abstractmethod
-    async def aread(self, feature: Feature, entity_id: str) -> Any:
+    def read(self, feature: Feature, entity_id: str) -> Any:
         """Retrieve a stored feature value for an entity.
 
         Args:
@@ -125,7 +110,28 @@ class FeatureStore(ABC):
         """
         ...
 
-    async def aexists(self, feature: Feature, entity_id: str) -> bool:
+    def write(
+        self,
+        feature: Feature,
+        entity_id: str,
+        result: ExtractionResult,
+        context: dict | None = None,
+    ) -> None:
+        """Persist an extraction result for a source entity.
+
+        Args:
+            feature: The ``Feature`` instance (class name used as namespace).
+            entity_id: Source entity identifier (parent write key).
+            result: :class:`~calcine.ExtractionResult` from ``Feature.extract``.
+            context: The pipeline context dict at write time.
+
+        Raises:
+            NotImplementedError: If this store is read-only.
+            StoreError: If the write operation fails.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support write operations.")
+
+    def exists(self, feature: Feature, entity_id: str) -> bool:
         """Check whether a feature value exists for an entity.
 
         Args:
@@ -140,7 +146,7 @@ class FeatureStore(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support exists operations.")
 
-    async def adelete(self, feature: Feature, entity_id: str) -> None:
+    def delete(self, feature: Feature, entity_id: str) -> None:
         """Delete the stored feature value for an entity.
 
         Args:
@@ -154,7 +160,7 @@ class FeatureStore(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not support delete operations.")
 
-    async def alist_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
+    def list_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
         """Return entity IDs stored for a feature, optionally filtered by prefix.
 
         Args:
@@ -172,34 +178,43 @@ class FeatureStore(ABC):
         raise NotImplementedError(f"{type(self).__name__} does not support list_entities.")
 
     # ------------------------------------------------------------------
-    # Synchronous convenience wrappers
+    # Async interface — wraps sync by default; override for native async
     # ------------------------------------------------------------------
 
-    def write(
+    async def aread(self, feature: Feature, entity_id: str) -> Any:
+        """Async version of ``read``.  Runs ``read()`` in a thread executor."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.read, feature, entity_id)
+
+    async def awrite(
         self,
         feature: Feature,
         entity_id: str,
         result: ExtractionResult,
         context: dict | None = None,
     ) -> None:
-        """Blocking version of :meth:`awrite` for use outside an async context."""
-        return asyncio.run(self.awrite(feature, entity_id, result, context))
+        """Async version of ``write``.  Runs ``write()`` in a thread executor."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.write, feature, entity_id, result, context)
 
-    def read(self, feature: Feature, entity_id: str) -> Any:
-        """Blocking version of :meth:`aread` for use outside an async context."""
-        return asyncio.run(self.aread(feature, entity_id))
+    async def aexists(self, feature: Feature, entity_id: str) -> bool:
+        """Async version of ``exists``.  Runs ``exists()`` in a thread executor."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.exists, feature, entity_id)
 
-    def exists(self, feature: Feature, entity_id: str) -> bool:
-        """Blocking version of :meth:`aexists` for use outside an async context."""
-        return asyncio.run(self.aexists(feature, entity_id))
+    async def adelete(self, feature: Feature, entity_id: str) -> None:
+        """Async version of ``delete``.  Runs ``delete()`` in a thread executor."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.delete, feature, entity_id)
 
-    def delete(self, feature: Feature, entity_id: str) -> None:
-        """Blocking version of :meth:`adelete` for use outside an async context."""
-        return asyncio.run(self.adelete(feature, entity_id))
+    async def alist_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
+        """Async version of ``list_entities``.  Runs ``list_entities()`` in a thread executor."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self.list_entities(feature, prefix))
 
-    def list_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
-        """Blocking version of :meth:`alist_entities` for use outside an async context."""
-        return asyncio.run(self.alist_entities(feature, prefix))
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _feature_key(self, feature: Feature) -> str:
         """Return a stable string namespace key for a feature instance.

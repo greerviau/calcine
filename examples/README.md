@@ -46,7 +46,7 @@ python examples/basic_usage.py
 
 ### `01_text_features.py` — Tabular features from review text
 
-Extracts 7 per-user statistics from 98k reviews into a `ParquetStore`.
+Extracts 7 per-user statistics from 98k reviews into a `FileStore`.
 Demonstrates multi-field schema, `Category` type, and timing a moderate-scale
 run (~5 000 entities).
 
@@ -54,7 +54,7 @@ run (~5 000 entities).
 python examples/01_text_features.py
 ```
 
-**Interesting parts:** `ReviewStats.extract`, `ParquetStore` output,
+**Interesting parts:** `ReviewStats.extract`, `FileStore` with `JSONSerializer`,
 `context` threading.
 
 ---

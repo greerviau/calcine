@@ -11,7 +11,7 @@ tied together by::
 
 Quick start::
 
-    from calcine import Pipeline
+    from calcine import ExtractionResult, Pipeline
     from calcine.sources import DataFrameSource
     from calcine.features.base import Feature
     from calcine.stores import MemoryStore
@@ -31,6 +31,24 @@ Quick start::
 
     report = pipeline.generate(["e1", "e2"])
     value  = pipeline.retrieve("e1")
+
+Implementing custom components::
+
+    # DataSource — override read() with plain sync code
+    class MySource(DataSource):
+        def read(self, entity_id: str, **kwargs):
+            return self.db.fetch(entity_id)
+
+    # FeatureStore — override sync read/write/exists/delete
+    class MyStore(FeatureStore):
+        def read(self, feature, entity_id):
+            return self.db.get(self._feature_key(feature), entity_id)
+
+        def write(self, feature, entity_id, result, context=None):
+            for sub_id, record in result.records.items():
+                self.db.set(self._feature_key(feature), sub_id, record)
+
+    # For natively async backends, override aread/awrite/aexists/adelete instead.
 """
 
 from .exceptions import CalcineError, SchemaViolationError, SourceError, StoreError

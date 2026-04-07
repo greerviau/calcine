@@ -59,7 +59,7 @@ class DocumentDirectorySource(DataSource):
     def __init__(self, doc_dir: Path) -> None:
         self.doc_dir = doc_dir
 
-    async def read(self, entity_id: str | None = None, **kwargs: Any) -> str:
+    def read(self, entity_id: str | None = None, **kwargs: Any) -> str:
         if entity_id is None:
             raise ValueError("entity_id required")
         path = self.doc_dir / f"{entity_id}.txt"

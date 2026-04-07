@@ -63,8 +63,6 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [ ] **Fault-tolerant SourceBundle** — Add `SourceBundle(..., fault_tolerant: bool = False)`. When enabled, a failing sub-source returns `None` for its key rather than propagating the exception. Lets features degrade gracefully when optional sources are unavailable.
 
-- [ ] **ParquetStore append optimization** — Current implementation loads the entire Parquet file, modifies a row, and rewrites. Replace with an append-and-deduplicate strategy (or partition by entity) to make writes O(1) rather than O(n).
-
 ---
 
 ## P2 — Quality of life
@@ -73,13 +71,11 @@ The built-in sources and file-based stores are reference implementations, not th
 
 - [x] **Simplify Feature API — removed `pre_extract` / `post_extract`** — Lifecycle hooks removed; `extract` is the single transformation point.
 
-- [ ] **Demote built-in sources to examples/extras** — `FileSource`, `DirectorySource`, `HTTPSource`, and `DataFrameSource` are thin wrappers that create a false impression of completeness. Move them to a `calcine.contrib` subpackage or clearly document them as reference implementations, not production components. The `DataSource` ABC is the product; the built-ins are scaffolding.
+- [ ] **Demote built-in sources to examples/extras** — `FileSource`, `DirectorySource`, and `DataFrameSource` are thin wrappers that create a false impression of completeness. Move them to a `calcine.contrib` subpackage or clearly document them as reference implementations, not production components. The `DataSource` ABC is the product; the built-ins are scaffolding.
 
 - [ ] **`Pipeline` async context manager** — Support `async with Pipeline(...) as p:` so stores that need setup/teardown (e.g., connection pools) can manage their lifecycle cleanly.
 
 - [ ] **Store inspection and prefix-based entity listing** — Add `FeatureStore.list_features() -> list[str]` and `FeatureStore.list_entities(feature, prefix: str | None = None) -> list[str]`. Prefix filtering is a first-class requirement, not an afterthought: it is the primary mechanism for discovering sub-entities produced by fan-out features (e.g. `store.list_entities(AudioSegmentFeature, prefix="recording_001/")`).
-
-- [ ] **HTTPSource retry/backoff** — Add `retries: int = 0` and `backoff: float = 0.5` parameters to `HTTPSource`. Retry on transient HTTP errors (5xx, timeouts) with exponential backoff.
 
 ---
 

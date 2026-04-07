@@ -67,7 +67,7 @@ class RegionalAPISource(DataSource):
 
     LATENCY = 0.005  # seconds
 
-    async def read(self, entity_id: str | None = None, **kwargs: Any) -> dict[str, float]:
+    async def aread(self, entity_id: str | None = None, **kwargs: Any) -> dict[str, float]:
         await asyncio.sleep(self.LATENCY)  # simulate network round-trip
         if entity_id not in SENSORS:
             raise KeyError(f"Unknown sensor: {entity_id}")

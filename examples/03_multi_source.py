@@ -52,7 +52,7 @@ class ConstantSource(DataSource):
     def __init__(self, value: Any) -> None:
         self.value = value
 
-    async def read(self, **kwargs: Any) -> Any:
+    def read(self, **kwargs: Any) -> Any:
         return self.value
 
 

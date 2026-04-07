@@ -9,8 +9,6 @@ from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import Any
 
-import pandas as pd
-
 from .extraction import ExtractionResult
 from .features.base import Feature
 from .sources.base import DataSource
@@ -50,7 +48,7 @@ def _run_entity_in_executor(
 ) -> tuple[ExtractionResult, list[str], dict[str, float]]:
     """Run one entity's extract pipeline stages in a thread or process.
 
-    Executes: ``source.read`` → ``feature.extract`` → validate.
+    Executes: ``source.aread`` → ``feature.extract`` → validate.
 
     Store writes are intentionally excluded so they remain in the main
     process (preserving correct behaviour for in-memory and async stores).
@@ -67,7 +65,7 @@ def _run_entity_in_executor(
 
     async def _work() -> tuple[ExtractionResult, list[str], dict[str, float]]:
         t0 = time.perf_counter()
-        raw = await source.read(entity_id=entity_id, context=context)
+        raw = await source.aread(entity_id=entity_id, context=context)
         t1 = time.perf_counter()
         result = await feature.extract(raw, context, entity_id=entity_id)
         t2 = time.perf_counter()
@@ -111,7 +109,7 @@ def _run_batch_in_executor(
         # --- Concurrent reads (timed individually) ---
         async def _timed_read(eid: str, ctx: dict) -> tuple[Any, float]:
             t0 = time.perf_counter()
-            raw = await source.read(entity_id=eid, context=ctx)
+            raw = await source.aread(entity_id=eid, context=ctx)
             return raw, time.perf_counter() - t0
 
         raw_timed: list[tuple[Any, float] | BaseException] = await asyncio.gather(
@@ -312,7 +310,7 @@ class GenerationReport:
             f"duration={self.duration_s:.2f}s)"
         )
 
-    def to_dataframe(self) -> pd.DataFrame:
+    def to_dataframe(self) -> Any:
         """Export a pandas DataFrame with one row per entity.
 
         Columns: ``entity_id``, ``status`` ("succeeded" / "failed" / "skipped"),
@@ -321,6 +319,8 @@ class GenerationReport:
         Note: succeeded rows are only present when ``store_results=True`` was
         used during ``generate()``.
         """
+        import pandas as pd
+
         rows: list[dict[str, Any]] = []
         for eid, result in self.succeeded.items():
             rows.append(
@@ -418,7 +418,7 @@ class Pipeline:
                 )
             else:
                 _t0 = time.perf_counter()
-                raw = await self.source.read(entity_id=entity_id, context=entity_ctx)
+                raw = await self.source.aread(entity_id=entity_id, context=entity_ctx)
                 _t1 = time.perf_counter()
                 result = await self.feature.extract(raw, entity_ctx, entity_id=entity_id)
                 _t2 = time.perf_counter()
@@ -563,7 +563,7 @@ class Pipeline:
         # --- 3. Concurrent reads (timed individually) ---
         async def _timed_read(eid: str) -> tuple[Any, float]:
             t0 = time.perf_counter()
-            raw = await self.source.read(entity_id=eid, context=entity_ctxs[eid])
+            raw = await self.source.aread(entity_id=eid, context=entity_ctxs[eid])
             return raw, time.perf_counter() - t0
 
         raw_timed: list[tuple[Any, float] | BaseException] = await asyncio.gather(

@@ -31,7 +31,7 @@ class MemoryStore(FeatureStore):
         # Structure: {feature_name: {entity_id: data}}
         self._data: dict[str, dict[str, Any]] = {}
 
-    async def awrite(
+    def write(
         self,
         feature: Feature,
         entity_id: str,
@@ -42,31 +42,31 @@ class MemoryStore(FeatureStore):
         if key not in self._data:
             self._data[key] = {}
         # Write metadata (or tombstone) under entity_id when it isn't already
-        # a record key — ensures aexists(entity_id) is True after any write.
+        # a record key — ensures exists(entity_id) is True after any write.
         if entity_id not in result.records:
             self._data[key][entity_id] = result.metadata if result.metadata is not None else {}
         for sub_id, record in result.records.items():
             self._data[key][sub_id] = record
 
-    async def aread(self, feature: Feature, entity_id: str) -> Any:
+    def read(self, feature: Feature, entity_id: str) -> Any:
         key = self._feature_key(feature)
         try:
             return self._data[key][entity_id]
         except KeyError:
             raise KeyError(f"No data for feature '{key}', entity '{entity_id}'") from None
 
-    async def aexists(self, feature: Feature, entity_id: str) -> bool:
+    def exists(self, feature: Feature, entity_id: str) -> bool:
         key = self._feature_key(feature)
         return key in self._data and entity_id in self._data[key]
 
-    async def adelete(self, feature: Feature, entity_id: str) -> None:
+    def delete(self, feature: Feature, entity_id: str) -> None:
         key = self._feature_key(feature)
         try:
             del self._data[key][entity_id]
         except KeyError:
             raise KeyError(f"No data for feature '{key}', entity '{entity_id}'") from None
 
-    async def alist_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
+    def list_entities(self, feature: Feature, prefix: str | None = None) -> list[str]:
         key = self._feature_key(feature)
         if key not in self._data:
             return []

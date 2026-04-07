@@ -180,11 +180,11 @@ async def demo_bundle_partial_failure() -> None:
     print(SEP + "C — SourceBundle: one sub-source failure drops the whole entity\n")
 
     class GoodSource(DataSource):
-        async def read(self, **kwargs: Any) -> str:
+        def read(self, **kwargs: Any) -> str:
             return "good data"
 
     class FlakySource(DataSource):
-        async def read(self, entity_id: str | None = None, **kwargs: Any) -> str:
+        def read(self, entity_id: str | None = None, **kwargs: Any) -> str:
             if entity_id == "u2":
                 raise ConnectionError("Simulated network error")
             return "flaky data"
@@ -213,9 +213,9 @@ async def demo_bundle_partial_failure() -> None:
         "    class FaultTolerantSource(DataSource):\n"
         "        def __init__(self, source, default=None):\n"
         "            self.source, self.default = source, default\n"
-        "        async def read(self, **kwargs):\n"
+        "        async def aread(self, **kwargs):\n"
         "            try:\n"
-        "                return await self.source.read(**kwargs)\n"
+        "                return await self.source.aread(**kwargs)\n"
         "            except Exception:\n"
         "                return self.default\n"
     )

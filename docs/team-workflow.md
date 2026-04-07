@@ -307,7 +307,7 @@ to whatever serving system you already have.
 
 **Not a data access layer.** calcine does not provide production-grade database
 clients, API clients, or data connectors. The built-in sources (`FileSource`,
-`HTTPSource`, `DataFrameSource`) are reference implementations. In practice,
+`DataFrameSource`) are reference implementations. In practice,
 feature engineers write a `DataSource` subclass that wraps their own data
 infrastructure.
 

@@ -17,7 +17,7 @@ backend, with no lock-in on format or framework.
 
 ---
 
-## Highlights
+## Key Features
 
 - **Pipeline orchestration** — concurrent entity processing with a semaphore cap; per-entity error isolation so valid results are always stored even when others fail; incremental generation skips already-stored entities; partition-by support for rate-limit-per-account and ordered-per-user scenarios
 - **Type-safe schemas** — validate scalars, strings, categoricals, ndarrays, bytes, lists, and dicts before anything hits the store; the same schema validates on read, making it a typed contract between feature producers and consumers
@@ -31,10 +31,7 @@ backend, with no lock-in on format or framework.
 ## Installation
 
 ```bash
-pip install calcine                  # core
-pip install "calcine[http]"          # + async HTTP source
-pip install "calcine[parquet]"       # + Parquet store
-pip install "calcine[dev]"           # + test/lint tools
+pip install calcine
 ```
 
 ---
@@ -63,9 +60,9 @@ class AudioFileSource(DataSource):
     def __init__(self, root: str):
         self._root = Path(root)
 
-    async def read(self, entity_id: str, **kwargs) -> bytes:
+    def read(self, entity_id: str, **kwargs) -> bytes:
         path = self._root / f"{entity_id}.wav"
-        return await asyncio.to_thread(path.read_bytes)
+        return path.read_bytes()
 
 
 # --- 2. Feature: extract log-mel spectrogram + metadata ---
@@ -94,20 +91,20 @@ class ZarrStore(FeatureStore):
     def __init__(self, path: str):
         self._root = zarr.open_group(path, mode="a")
 
-    async def awrite(self, feature, entity_id, result, **kwargs):
+    def write(self, feature, entity_id, result, context=None):
         for sub_id, record in result.records.items():
             grp = self._root.require_group(sub_id)
             grp["spectrogram"] = record["spectrogram"]
             grp.attrs.update({k: v for k, v in record.items() if k != "spectrogram"})
 
-    async def aread(self, feature, entity_id):
+    def read(self, feature, entity_id):
         grp = self._root[entity_id]
         return {"spectrogram": grp["spectrogram"][:], **dict(grp.attrs)}
 
-    async def aexists(self, feature, entity_id) -> bool:
+    def exists(self, feature, entity_id) -> bool:
         return entity_id in self._root
 
-    async def adelete(self, feature, entity_id):
+    def delete(self, feature, entity_id):
         del self._root[entity_id]
 
 
@@ -250,35 +247,6 @@ See [`docs/sources.md`](docs/sources.md) and [`docs/stores.md`](docs/stores.md).
 ## Documentation
 
 See [`docs/`](docs/README.md) for the full documentation index.
-
----
-
-## Running the tests
-
-```bash
-uv pip install -e ".[dev]"
-pytest
-```
-
----
-
-## Project layout
-
-```
-calcine/
-├── pipeline.py        Pipeline + GenerationReport
-├── extraction.py      ExtractionResult
-├── schema.py          FeatureSchema + type system
-├── serializers.py     Serializer ABC + Pickle / JSON / Numpy
-├── exceptions.py      SourceError, StoreError, SchemaViolationError
-├── sources/           DataSource ABC + built-in sources
-├── features/          Feature ABC
-└── stores/            FeatureStore ABC + built-in stores
-
-tests/                 test suite mirroring the calcine structure
-examples/              runnable end-to-end scripts + generated datasets
-docs/                  architecture, extension guide, schema reference
-```
 
 ---
 

@@ -4,7 +4,6 @@ from .base import DataSource
 from .bundle import SourceBundle
 from .dataframe import DataFrameSource
 from .file import DirectorySource, FileSource
-from .http import HTTPSource
 
 __all__ = [
     "DataSource",
@@ -12,5 +11,4 @@ __all__ = [
     "FileSource",
     "DirectorySource",
     "DataFrameSource",
-    "HTTPSource",
 ]

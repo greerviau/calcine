@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,16 +45,11 @@ class FileStore(FeatureStore):
     def _entity_path(self, feature: Feature, entity_id: str) -> Path:
         return self.path / self._feature_key(feature) / f"{entity_id}.bin"
 
-    async def _awrite_single(self, feature: Feature, entity_id: str, data: Any) -> None:
+    def _write_single(self, feature: Feature, entity_id: str, data: Any) -> None:
         path = self._entity_path(feature, entity_id)
-        loop = asyncio.get_running_loop()
-
-        def _write() -> None:
+        try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(self.serializer.serialize(data))
-
-        try:
-            await loop.run_in_executor(None, _write)
         except Exception as exc:
             raise StoreError(
                 store_name=type(self).__name__,
@@ -64,7 +58,7 @@ class FileStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def awrite(
+    def write(
         self,
         feature: Feature,
         entity_id: str,
@@ -72,23 +66,21 @@ class FileStore(FeatureStore):
         context: dict | None = None,
     ) -> None:
         # Write metadata (or tombstone) under entity_id when it isn't already
-        # a record key — ensures aexists(entity_id) is True after any write.
+        # a record key — ensures exists(entity_id) is True after any write.
         if entity_id not in result.records:
             parent = result.metadata if result.metadata is not None else {}
-            await self._awrite_single(feature, entity_id, parent)
+            self._write_single(feature, entity_id, parent)
         for sub_id, record in result.records.items():
-            await self._awrite_single(feature, sub_id, record)
+            self._write_single(feature, sub_id, record)
 
-    async def aread(self, feature: Feature, entity_id: str) -> Any:
+    def read(self, feature: Feature, entity_id: str) -> Any:
         path = self._entity_path(feature, entity_id)
         if not path.exists():
             raise KeyError(
                 f"No data for feature '{self._feature_key(feature)}', entity '{entity_id}'"
             )
-        loop = asyncio.get_running_loop()
         try:
-            raw = await loop.run_in_executor(None, path.read_bytes)
-            return self.serializer.deserialize(raw)
+            return self.serializer.deserialize(path.read_bytes())
         except KeyError:
             raise
         except Exception as exc:
@@ -99,18 +91,17 @@ class FileStore(FeatureStore):
                 cause=exc,
             ) from exc
 
-    async def aexists(self, feature: Feature, entity_id: str) -> bool:
+    def exists(self, feature: Feature, entity_id: str) -> bool:
         return self._entity_path(feature, entity_id).exists()
 
-    async def adelete(self, feature: Feature, entity_id: str) -> None:
+    def delete(self, feature: Feature, entity_id: str) -> None:
         path = self._entity_path(feature, entity_id)
         if not path.exists():
             raise KeyError(
                 f"No data for feature '{self._feature_key(feature)}', entity '{entity_id}'"
             )
-        loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, path.unlink)
+            path.unlink()
         except Exception as exc:
             raise StoreError(
                 store_name=type(self).__name__,

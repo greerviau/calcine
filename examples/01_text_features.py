@@ -1,12 +1,12 @@
 """01 — Text / Review Feature Extraction
 
 Loads 98k user reviews from examples/data/reviews.csv and extracts
-per-user statistics into a ParquetStore.
+per-user statistics into a FileStore.
 
 Demonstrates:
   - DataFrameSource on a realistic multi-row-per-entity dataset
   - Multi-field FeatureSchema (Int64, Float64, Category)
-  - ParquetStore for tabular feature output
+  - FileStore with JSONSerializer for tabular feature output
   - context dict threading (run_id tag)
   - Timing a moderate-scale pipeline (~5 000 entities)
 
@@ -25,8 +25,9 @@ import pandas as pd
 from calcine import ExtractionResult, Pipeline
 from calcine.features.base import Feature
 from calcine.schema import FeatureSchema, types
+from calcine.serializers import JSONSerializer
 from calcine.sources import DataFrameSource
-from calcine.stores import ParquetStore
+from calcine.stores import FileStore
 
 DATA = Path(__file__).parent / "data"
 STORE_PATH = Path(__file__).parent / "data" / "store_01_text"
@@ -87,7 +88,7 @@ async def main() -> None:
     pipeline = Pipeline(
         source=DataFrameSource(df),
         feature=ReviewStats(),
-        store=ParquetStore(str(STORE_PATH)),
+        store=FileStore(str(STORE_PATH), serializer=JSONSerializer()),
     )
 
     print(f"\nRunning pipeline for {len(entity_ids):,} entities …")

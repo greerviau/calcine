@@ -26,14 +26,14 @@ class DataFrameSource(DataSource):
     Example::
 
         source = DataFrameSource(df, entity_col="user_id")
-        rows = await source.read(entity_id="u123")
+        rows = source.read(entity_id="u123")
     """
 
     def __init__(self, df: pd.DataFrame, entity_col: str = "entity_id") -> None:
         self.df = df
         self.entity_col = entity_col
 
-    async def read(self, entity_id: str | None = None, **kwargs: Any) -> pd.DataFrame:
+    def read(self, entity_id: str | None = None, **kwargs: Any) -> pd.DataFrame:
         """Return a copy of rows whose entity column matches *entity_id*.
 
         Args:

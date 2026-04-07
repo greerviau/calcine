@@ -20,13 +20,13 @@ class FileSource(DataSource):
     Example::
 
         source = FileSource("/data/model_weights.bin")
-        raw = await source.read()
+        raw = source.read()
     """
 
     def __init__(self, path: str) -> None:
         self.path = path
 
-    async def read(self, **kwargs: Any) -> bytes:
+    def read(self, **kwargs: Any) -> bytes:
         """Read the file and return its contents as bytes.
 
         Args:
@@ -38,9 +38,8 @@ class FileSource(DataSource):
         Raises:
             SourceError: If the file cannot be read.
         """
-        loop = asyncio.get_running_loop()
         try:
-            return await loop.run_in_executor(None, Path(self.path).read_bytes)
+            return Path(self.path).read_bytes()
         except Exception as exc:
             raise SourceError(
                 source_name=type(self).__name__,
@@ -67,21 +66,44 @@ class DirectorySource(DataSource):
         self.path = path
         self.pattern = pattern
 
-    async def read(self, **kwargs: Any) -> list[bytes]:
+    def read(self, **kwargs: Any) -> list[bytes]:
         """Read all matching files and return them as a list of byte strings.
 
         Returns:
             List of file contents, sorted by filename.
+
+        Raises:
+            SourceError: If the directory cannot be listed or a file cannot
+                be read.
         """
+        directory = Path(self.path)
+        try:
+            paths = sorted(directory.glob(self.pattern))
+        except Exception as exc:
+            raise SourceError(
+                source_name=type(self).__name__,
+                entity_id=kwargs.get("entity_id", self.path),
+                cause=exc,
+            ) from exc
+
         results: list[bytes] = []
-        async for chunk in self.stream(**kwargs):
-            results.append(chunk)
+        for file_path in paths:
+            if not file_path.is_file():
+                continue
+            try:
+                results.append(file_path.read_bytes())
+            except Exception as exc:
+                raise SourceError(
+                    source_name=type(self).__name__,
+                    entity_id=str(file_path),
+                    cause=exc,
+                ) from exc
         return results
 
     async def stream(self, **kwargs: Any) -> AsyncIterator[bytes]:
         """Yield bytes from each file matching the pattern.
 
-        Files are yielded in sorted path order.
+        Files are yielded in sorted path order, each read off-thread.
 
         Raises:
             SourceError: If the directory cannot be listed or a file cannot

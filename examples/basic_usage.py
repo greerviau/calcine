@@ -50,7 +50,7 @@ _USER_DB: dict[str, dict[str, Any]] = {
 class UserDBSource(DataSource):
     """Fetch a single user's activity record from the (simulated) database."""
 
-    async def read(self, entity_id: str, **kwargs: Any) -> dict[str, Any]:
+    async def aread(self, entity_id: str, **kwargs: Any) -> dict[str, Any]:
         await asyncio.sleep(0.05)  # simulate ~50 ms network round-trip
         if entity_id not in _USER_DB:
             raise KeyError(f"No record found for user '{entity_id}'")

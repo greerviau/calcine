@@ -13,16 +13,6 @@ from calcine.serializers import JSONSerializer, NumpySerializer
 from calcine.stores import FileStore, MemoryStore
 from calcine.stores.base import FeatureStore
 
-# Optional parquet deps
-try:
-    import pandas  # noqa: F401
-    import pyarrow  # noqa: F401
-
-    HAS_PARQUET = True
-except ImportError:
-    HAS_PARQUET = False
-
-
 # ---------------------------------------------------------------------------
 # Shared fixture feature
 # ---------------------------------------------------------------------------
@@ -186,79 +176,6 @@ class TestFileStore:
 
 
 # ---------------------------------------------------------------------------
-# ParquetStore (skipped if deps unavailable)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skipif(not HAS_PARQUET, reason="pandas/pyarrow not installed")
-class TestParquetStore:
-    @pytest.mark.asyncio
-    async def test_write_and_read(self, feature):
-        from calcine.stores import ParquetStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"score": 0.5, "count": 3}))
-            result = await store.aread(feature, "e1")
-            assert result["score"] == pytest.approx(0.5)
-            assert result["count"] == 3
-
-    @pytest.mark.asyncio
-    async def test_exists(self, feature):
-        from calcine.stores import ParquetStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ParquetStore(tmpdir)
-            assert not await store.aexists(feature, "e1")
-            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
-            assert await store.aexists(feature, "e1")
-
-    @pytest.mark.asyncio
-    async def test_delete(self, feature):
-        from calcine.stores import ParquetStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
-            await store.adelete(feature, "e1")
-            assert not await store.aexists(feature, "e1")
-
-    @pytest.mark.asyncio
-    async def test_multiple_entities(self, feature):
-        from calcine.stores import ParquetStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
-            await store.awrite(feature, "e2", ExtractionResult.of("e2", {"v": 2.0}))
-
-            r1 = await store.aread(feature, "e1")
-            r2 = await store.aread(feature, "e2")
-            assert r1["v"] == pytest.approx(1.0)
-            assert r2["v"] == pytest.approx(2.0)
-
-    @pytest.mark.asyncio
-    async def test_overwrite_entity(self, feature):
-        from calcine.stores import ParquetStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ParquetStore(tmpdir)
-            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 1.0}))
-            await store.awrite(feature, "e1", ExtractionResult.of("e1", {"v": 99.0}))
-            result = await store.aread(feature, "e1")
-            assert result["v"] == pytest.approx(99.0)
-
-    @pytest.mark.asyncio
-    async def test_read_missing_raises_key_error(self, feature):
-        from calcine.stores import ParquetStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = ParquetStore(tmpdir)
-            with pytest.raises(KeyError):
-                await store.aread(feature, "missing")
-
-
-# ---------------------------------------------------------------------------
 # FeatureStore base class — default method behaviour
 # ---------------------------------------------------------------------------
 
@@ -269,7 +186,7 @@ class ReadOnlyStore(FeatureStore):
     def __init__(self, data: dict):
         self._data = data
 
-    async def aread(self, feature, entity_id):
+    def read(self, feature, entity_id):
         key = (type(feature).__name__, entity_id)
         if key not in self._data:
             raise KeyError(entity_id)

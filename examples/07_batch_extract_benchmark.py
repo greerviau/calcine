@@ -91,7 +91,7 @@ ALL_IDS = sorted(ENTITY_DATA.keys())
 class VectorSource(DataSource):
     """Returns a pre-computed input vector with simulated async read latency."""
 
-    async def read(self, entity_id: str | None = None, **kwargs: Any) -> np.ndarray:
+    async def aread(self, entity_id: str | None = None, **kwargs: Any) -> np.ndarray:
         await asyncio.sleep(READ_LATENCY)
         return ENTITY_DATA[entity_id]  # type: ignore[index]
 
