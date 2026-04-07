@@ -252,9 +252,4 @@ See [`docs/`](docs/README.md) for the full documentation index.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). All contributions are welcome —
-new sources, stores, schema types, bug fixes, and documentation improvements.
-
-## License
-
-[MIT](LICENSE)
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
