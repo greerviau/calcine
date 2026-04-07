@@ -199,3 +199,5 @@ examples/data/store_*/
 
 # Claude Code (ignore local settings, but CLAUDE.md is safe to commit)
 .claude/settings.local.json
+
+uv.lock
