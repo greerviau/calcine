@@ -197,5 +197,5 @@ examples/data/store_*/
 # macOS
 .DS_Store
 
-# Claude Code project memory
-.claude/
+# Claude Code (ignore local settings, but CLAUDE.md is safe to commit)
+.claude/settings.local.json
