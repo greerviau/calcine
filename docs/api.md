@@ -54,7 +54,7 @@ All keyword arguments are identical between the two.
 | `partitions` | `dict[str, list[str]]` | `None` | Pre-built partition map. Mutually exclusive with `entity_ids`. |
 | `partition_by` | `(entity_id) -> Hashable` | `None` | Groups `entity_ids` into partitions by return value. Requires `entity_ids`; cannot combine with `partitions`. |
 | `partition_context_fn` | `(partition_key) -> dict` | `None` | Context additions for all entities in a partition. Merged between `context` and `context_fn`. |
-| `concurrency` | `int` | `1` | Max concurrent partitions (or batches in flat mode). |
+| `concurrency` | `int \| None` | `None` | Max concurrent partitions (or batches in flat mode). When `None` and `executor` is provided, inferred from the executor's worker count. When `None` and no executor, defaults to `1`. |
 | `batch_size` | `int` | `1` | Entities per `extract_batch` call. `1` uses the per-entity `extract` path. |
 | `overwrite` | `bool` | `True` | When `False`, already-stored entities are skipped without re-extracting. |
 | `store_results` | `bool` | `True` | When `False`, `report.succeeded` is empty (saves memory on large runs). |
@@ -194,25 +194,33 @@ to signal per-entity failure without aborting the rest of the batch.
 #### Executor support
 
 Pass a `concurrent.futures.Executor` to offload the read + extract + validate
-pipeline stages out of the asyncio event loop.
+pipeline stages out of the asyncio event loop. When `concurrency` is not set,
+it is inferred automatically from the executor's worker count.
 
 ```python
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 # Thread pool — useful when your feature holds the GIL (numpy, pandas)
 with ThreadPoolExecutor(max_workers=8) as pool:
-    report = pipeline.generate(entity_ids=ids, concurrency=8, executor=pool)
+    report = pipeline.generate(entity_ids=ids, executor=pool)
 
 # Process pool — bypasses the GIL for CPU-bound extraction
 with ProcessPoolExecutor(max_workers=4) as pool:
-    report = pipeline.generate(entity_ids=ids, concurrency=4, executor=pool)
+    report = pipeline.generate(entity_ids=ids, executor=pool)
 ```
 
 Store writes always run in the main process, so all store backends (including
 `MemoryStore`) work correctly regardless of executor type.
 
 With `ProcessPoolExecutor`, your `DataSource` and `Feature` must be picklable.
-Set `concurrency` to match the pool's `max_workers`.
+
+You can still override `concurrency` explicitly if you want fewer concurrent
+tasks than the pool has workers (e.g. to leave headroom for other work):
+
+```python
+with ProcessPoolExecutor(max_workers=8) as pool:
+    report = pipeline.generate(entity_ids=ids, executor=pool, concurrency=4)
+```
 
 ---
 

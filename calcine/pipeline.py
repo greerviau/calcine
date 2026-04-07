@@ -667,7 +667,7 @@ class Pipeline:
         partition_by: Callable[[str], Hashable] | None = None,
         context_fn: Callable[[str], dict[str, Any]] | None = None,
         partition_context_fn: Callable[[Hashable], dict[str, Any]] | None = None,
-        concurrency: int = 1,
+        concurrency: int | None = None,
         batch_size: int = 1,
         overwrite: bool = True,
         store_results: bool = True,
@@ -765,8 +765,9 @@ class Pipeline:
                 main process, so all store implementations (including
                 ``MemoryStore``) work correctly.  When using
                 ``ProcessPoolExecutor``, ``source`` and ``feature`` must be
-                picklable.  Set ``concurrency`` to match the executor's
-                ``max_workers`` so all workers can run concurrently.
+                picklable.  When *concurrency* is not set and *executor* is
+                provided, concurrency is inferred from the executor's
+                ``_max_workers`` attribute automatically.
 
         Returns:
             ``GenerationReport`` collecting every success, failure, and skip.
@@ -774,6 +775,10 @@ class Pipeline:
         Raises:
             ValueError: If arguments are mutually exclusive or invalid.
         """
+        # --- Resolve concurrency ---
+        if concurrency is None:
+            concurrency = getattr(executor, "_max_workers", 1)
+
         # --- Validate arguments ---
         if entity_ids is not None and partitions is not None:
             raise ValueError("Pass either 'entity_ids' or 'partitions', not both.")
