@@ -106,7 +106,7 @@ class DocumentEmbedding(Feature):
         {"embedding": types.NDArray(shape=(EMBED_DIM,), dtype="float32", nullable=False)}
     )
 
-    async def extract(self, raw: str, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: str, context: dict, entity_id: str | None = None) -> ExtractionResult:
         result = _trigram_embed(raw)
         norm = float(np.linalg.norm(result))
         if norm > 0:

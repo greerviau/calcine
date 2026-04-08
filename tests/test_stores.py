@@ -19,12 +19,12 @@ from calcine.stores.base import FeatureStore
 
 
 class DummyFeature(Feature):
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         return ExtractionResult.of(entity_id, raw)
 
 
 class AnotherFeature(Feature):
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         return ExtractionResult.of(entity_id, raw)
 
 

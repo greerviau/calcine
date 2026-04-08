@@ -23,7 +23,7 @@ from calcine.stores import MemoryStore
 class MeanFeature(Feature):
     schema = FeatureSchema({"mean_value": types.Float64(nullable=False)})
 
-    async def extract(
+    def extract(
         self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
     ) -> ExtractionResult:
         if raw.empty:
@@ -32,22 +32,27 @@ class MeanFeature(Feature):
 
 
 class FailingFeature(Feature):
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         raise RuntimeError("Intentional extraction failure")
 
 
 class SlowFeature(Feature):
-    """Yields once during extract so other coroutines can interleave."""
+    """Yields once during aextract so other coroutines can interleave."""
 
     def __init__(self, order_log: list[str]) -> None:
         self.order_log = order_log
 
-    async def extract(
+    async def aextract(
         self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
     ) -> ExtractionResult:
         self.order_log.append(f"start:{entity_id or '?'}")
         await asyncio.sleep(0)  # yield to event loop
         self.order_log.append(f"end:{entity_id or '?'}")
+        return ExtractionResult.of(entity_id, {"value": 1.0})
+
+    def extract(
+        self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
+    ) -> ExtractionResult:  # pragma: no cover — aextract overrides the call path
         return ExtractionResult.of(entity_id, {"value": 1.0})
 
 
@@ -133,7 +138,7 @@ async def test_generate_schema_violation_captured_as_failure(df):
     class BadFeature(Feature):
         schema = FeatureSchema({"score": types.Float64(nullable=False)})
 
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"score": "not_a_float"})  # wrong type
 
     pipeline = Pipeline(
@@ -164,7 +169,7 @@ async def test_generate_context_forwarded_to_extract(df):
     received: dict = {}
 
     class ContextCapture(Feature):
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             received.update(context)
             return ExtractionResult.of(entity_id, {"v": 1.0})
 
@@ -269,9 +274,8 @@ async def test_generate_serial_within_partition():
     order: list[str] = []
 
     class OrderedFeature(Feature):
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             order.append(raw)
-            await asyncio.sleep(0)  # yield — would allow interleaving if not serial
             return ExtractionResult.of(entity_id, {"v": 1.0})
 
     # Two partitions with 3 entities each; concurrency=2 lets both run at once.
@@ -342,7 +346,7 @@ async def test_generate_explicit_partitions_serial_within_group():
     processed: list[str] = []
 
     class RecordFeature(Feature):
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             processed.append(raw)
             return ExtractionResult.of(entity_id, {"v": 1.0})
 
@@ -590,10 +594,10 @@ class BatchTrackingFeature(Feature):
     def __init__(self) -> None:
         self.calls: list[int] = []  # sizes of each extract_batch call
 
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         return ExtractionResult.of(entity_id, {"v": 1.0})
 
-    async def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
+    def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
         self.calls.append(len(raws))
         return [
             ExtractionResult.of(eid, {"v": float(i)})
@@ -604,10 +608,10 @@ class BatchTrackingFeature(Feature):
 class PartialFailBatchFeature(Feature):
     """extract_batch returns an exception for every other entity."""
 
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         return ExtractionResult.of(entity_id, {"v": 1.0})
 
-    async def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
+    def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
         results = []
         eids = entity_ids or [None] * len(raws)
         for i, (_raw, eid) in enumerate(zip(raws, eids, strict=True)):
@@ -621,10 +625,10 @@ class PartialFailBatchFeature(Feature):
 class WholeBatchFailFeature(Feature):
     """extract_batch always raises, failing the entire batch."""
 
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         return ExtractionResult.of(entity_id, {"v": 1.0})
 
-    async def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
+    def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
         raise RuntimeError("Whole batch exploded")
 
 
@@ -1008,7 +1012,7 @@ class ContextCaptureFeature(Feature):
     def __init__(self) -> None:
         self.received: dict[str, dict] = {}
 
-    async def extract(self, raw, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw, context: dict, entity_id: str | None = None) -> ExtractionResult:
         self.received[entity_id or "?"] = dict(context)
         return ExtractionResult.of(entity_id, {"v": 1.0})
 
@@ -1019,10 +1023,10 @@ class ContextCaptureBatchFeature(Feature):
     def __init__(self) -> None:
         self.received_contexts: list[dict] | None = None
 
-    async def extract(self, raw, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw, context: dict, entity_id: str | None = None) -> ExtractionResult:
         return ExtractionResult.of(entity_id, {"v": 1.0})
 
-    async def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
+    def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
         self.received_contexts = list(entity_contexts) if entity_contexts is not None else None
         eids = entity_ids or [None] * len(raws)
         return [ExtractionResult.of(eid, {"v": 1.0}) for eid in eids]
@@ -1151,7 +1155,7 @@ async def test_executor_validation_failure_recorded(df):
     class WrongTypeFeature(Feature):
         schema = FeatureSchema({"mean_value": types.Float64(nullable=False)})
 
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"mean_value": "not_a_float"})
 
     pipeline = Pipeline(source=DataFrameSource(df), feature=WrongTypeFeature(), store=MemoryStore())

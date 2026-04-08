@@ -20,7 +20,7 @@ Quick start::
     class MyFeature(Feature):
         schema = FeatureSchema({"score": types.Float64(nullable=False)})
 
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"score": raw["value"].mean()})
 
     pipeline = Pipeline(
@@ -49,6 +49,7 @@ Implementing custom components::
                 self.db.set(self._feature_key(feature), sub_id, record)
 
     # For natively async backends, override aread/awrite/aexists/adelete instead.
+    # Feature — override aextract() for natively async extraction (async HTTP, async model client).
 """
 
 from .exceptions import CalcineError, SchemaViolationError, SourceError, StoreError

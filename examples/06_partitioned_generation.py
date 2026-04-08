@@ -90,7 +90,7 @@ class SensorReading(Feature):
         }
     )
 
-    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         threshold = context.get("alert_threshold", 15.0)
         return ExtractionResult.of(entity_id, {
             "baseline": raw["baseline"],

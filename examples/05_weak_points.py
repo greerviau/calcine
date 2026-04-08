@@ -63,7 +63,7 @@ async def demo_nan() -> None:
     class NanFeature(Feature):
         schema = FeatureSchema({"score": types.Float64(nullable=False)})
 
-        async def extract(
+        def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
         ) -> ExtractionResult:
             # mean() on an empty group returns NaN
@@ -94,7 +94,7 @@ async def demo_nan() -> None:
     class SafeNanFeature(Feature):
         schema = FeatureSchema({"score": types.Float64(nullable=False)})
 
-        async def extract(
+        def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
         ) -> ExtractionResult:
             result = {"score": float(raw["amount"].mean())}
@@ -130,7 +130,7 @@ async def demo_empty_source() -> None:
     class UnguardedFeature(Feature):
         schema = FeatureSchema({"mean": types.Float64(nullable=False)})
 
-        async def extract(
+        def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
         ) -> ExtractionResult:
             # This does NOT raise on empty — it returns NaN (see weak point A)
@@ -156,7 +156,7 @@ async def demo_empty_source() -> None:
     class GuardedFeature(Feature):
         schema = FeatureSchema({"mean": types.Float64(nullable=False)})
 
-        async def extract(
+        def extract(
             self, raw: pd.DataFrame, context: dict, entity_id: str | None = None
         ) -> ExtractionResult:
             if raw.empty:
@@ -190,7 +190,7 @@ async def demo_bundle_partial_failure() -> None:
             return "flaky data"
 
     class BundleFeature(Feature):
-        async def extract(self, raw, ctx, entity_id=None):
+        def extract(self, raw, ctx, entity_id=None):
             return ExtractionResult.of(entity_id, {"v": raw["good"]})
 
     pipeline = Pipeline(
@@ -232,14 +232,14 @@ async def demo_name_collision() -> None:
     # Simulate two feature classes from different teams / modules that both
     # happen to be named "EngagementScore".
     class EngagementScore(Feature):  # "team A" version
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"v": "team_A_value"})
 
     # Rebind same name — identical __name__, different implementation
     _EngagementScore_A = EngagementScore
 
     class EngagementScore(Feature):  # "team B" version  # noqa: F811
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"v": "team_B_value"})
 
     _EngagementScore_B = EngagementScore
@@ -282,13 +282,13 @@ async def demo_name_collision() -> None:
     class TeamAScore(Feature):
         feature_name = "team_a.engagement_score"
 
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"v": "team_A_value"})
 
     class TeamBScore(Feature):
         feature_name = "team_b.engagement_score"
 
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"v": "team_B_value"})
 
     safe_store = ModuleAwareStore()
@@ -329,7 +329,10 @@ async def demo_serial_processing() -> None:
     N = 60
 
     class IoFeature(Feature):
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
+            return ExtractionResult.of(entity_id, {"v": 1.0})
+
+        async def aextract(self, raw, context, entity_id=None):
             await asyncio.sleep(0.005)  # 5 ms simulated async I/O
             return ExtractionResult.of(entity_id, {"v": 1.0})
 

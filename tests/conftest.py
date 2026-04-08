@@ -20,14 +20,14 @@ class MeanAmountFeature(Feature):
 
     schema = FeatureSchema({"mean_value": types.Float64(nullable=False)})
 
-    async def extract(self, raw: pd.DataFrame, context: dict) -> dict:
+    def extract(self, raw: pd.DataFrame, context: dict) -> dict:
         return {"mean_value": float(raw["amount"].mean())}
 
 
 class RawPassthroughFeature(Feature):
     """Returns the raw input unchanged (no schema)."""
 
-    async def extract(self, raw, context):
+    def extract(self, raw, context):
         return raw
 
 

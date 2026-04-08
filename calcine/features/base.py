@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
@@ -21,12 +22,20 @@ class Feature(ABC):
     ``schema`` validates each record in the result.
     ``metadata_schema`` validates ``ExtractionResult.metadata``.
 
+    Override the synchronous methods (``extract``, ``extract_batch``,
+    ``validate``).  The framework calls the async variants (``aextract``,
+    ``aextract_batch``) internally; by default these run the sync
+    implementations in a thread executor.
+
+    For natively async extraction (async model inference, async HTTP),
+    override ``aextract`` or ``aextract_batch`` directly instead.
+
     Single-record example::
 
         class PurchaseValueFeature(Feature):
             schema = FeatureSchema({"mean": types.Float64(nullable=False)})
 
-            async def extract(self, raw, context, entity_id=None):
+            def extract(self, raw, context, entity_id=None):
                 return ExtractionResult.of(entity_id, {"mean": raw["amount"].mean()})
 
     Fan-out example::
@@ -35,21 +44,32 @@ class Feature(ABC):
             metadata_schema = FeatureSchema({"duration_s": types.Float64(nullable=False)})
             schema = FeatureSchema({"rms": types.Float64(nullable=False)})
 
-            async def extract(self, raw, context, entity_id=None):
+            def extract(self, raw, context, entity_id=None):
                 segments = split(raw)
                 return ExtractionResult(
                     metadata={"duration_s": len(raw) / SR},
                     records={f"{entity_id}/{i}": {"rms": rms(s)} for i, s in enumerate(segments)},
                 )
+
+    Native-async example (async model client)::
+
+        class EmbeddingFeature(Feature):
+            schema = FeatureSchema({"vec": types.NDArray(shape=(768,), dtype="float32")})
+
+            async def aextract(self, raw, context, entity_id=None):
+                vec = await self.client.embed(raw)
+                return ExtractionResult.of(entity_id, {"vec": vec})
     """
 
     schema: ClassVar[FeatureSchema | None] = None
     metadata_schema: ClassVar[FeatureSchema | None] = None
 
+    # ------------------------------------------------------------------
+    # Sync implementation interface — override these
+    # ------------------------------------------------------------------
+
     @abstractmethod
-    async def extract(
-        self, raw: Any, context: dict, entity_id: str | None = None
-    ) -> ExtractionResult:
+    def extract(self, raw: Any, context: dict, entity_id: str | None = None) -> ExtractionResult:
         """Extract the feature value from raw source data.
 
         Args:
@@ -68,7 +88,7 @@ class Feature(ABC):
         """
         ...
 
-    async def extract_batch(
+    def extract_batch(
         self,
         raws: list[Any],
         context: dict[str, Any],
@@ -108,12 +128,12 @@ class Feature(ABC):
             eid = entity_ids[i] if entity_ids is not None else None
             ctx = entity_contexts[i] if entity_contexts is not None else context
             try:
-                results.append(await self.extract(raw, ctx, entity_id=eid))
+                results.append(self.extract(raw, ctx, entity_id=eid))
             except Exception as exc:  # noqa: BLE001
                 results.append(exc)
         return results
 
-    async def validate(self, result: Any) -> list[str]:
+    def validate(self, result: Any) -> list[str]:
         """Validate a single extracted record value.
 
         Uses ``schema.validate`` if ``schema`` is set; otherwise returns
@@ -130,3 +150,37 @@ class Feature(ABC):
         if self.schema is not None:
             return self.schema.validate(result)
         return []
+
+    # ------------------------------------------------------------------
+    # Async interface — wraps sync by default; override for native async
+    # ------------------------------------------------------------------
+
+    async def aextract(
+        self, raw: Any, context: dict, entity_id: str | None = None
+    ) -> ExtractionResult:
+        """Async version of ``extract``.  Runs ``extract()`` in a thread executor.
+
+        Override this instead of ``extract`` for natively async extraction
+        (async model clients, async HTTP, etc.).
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.extract(raw, context, entity_id=entity_id)
+        )
+
+    async def aextract_batch(
+        self,
+        raws: list[Any],
+        context: dict[str, Any],
+        entity_ids: list[str] | None = None,
+        entity_contexts: list[dict[str, Any]] | None = None,
+    ) -> list[ExtractionResult | BaseException]:
+        """Async version of ``extract_batch``.  Runs ``extract_batch()`` in a thread executor.
+
+        Override this instead of ``extract_batch`` for natively async batch
+        extraction.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.extract_batch(raws, context, entity_ids, entity_contexts)
+        )

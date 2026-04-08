@@ -59,7 +59,7 @@ class SensorStats(Feature):
         }
     )
 
-    async def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> ExtractionResult:
         if raw.empty:
             raise ValueError("No readings for this sensor")
 
@@ -175,7 +175,7 @@ async def main() -> None:
 
     # Simulate a feature that does 2 ms of async I/O per entity
     class SlowFeature(Feature):
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             await asyncio.sleep(0.002)  # simulate async API call
             return ExtractionResult.of(entity_id, {"value": 1.0})
 

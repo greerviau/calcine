@@ -91,20 +91,37 @@ class SentimentFeature(Feature):
     def __init__(self, model):
         self.model = model
 
-    async def extract(self, raw: str, context: dict) -> dict:
-        score = await self.model.predict(raw)
+    def extract(self, raw: str, context: dict, entity_id=None) -> ExtractionResult:
+        score = self.model.predict(raw)
         label = "positive" if score > 0.6 else "negative" if score < 0.4 else "neutral"
-        return {
+        return ExtractionResult.of(entity_id, {
             "score":     float(score),
             "label":     label,
             "confident": abs(score - 0.5) > 0.3,
-        }
+        })
+```
+
+For models with a **native async client**, override `aextract` instead:
+
+```python
+class AsyncSentimentFeature(Feature):
+    def __init__(self, async_client):
+        self.client = async_client
+
+    async def aextract(self, raw: str, context: dict, entity_id=None) -> ExtractionResult:
+        score = await self.client.predict(raw)
+        label = "positive" if score > 0.6 else "negative" if score < 0.4 else "neutral"
+        return ExtractionResult.of(entity_id, {
+            "score":     float(score),
+            "label":     label,
+            "confident": abs(score - 0.5) > 0.3,
+        })
 ```
 
 **Lifecycle:**
 
 ```
-source.aread() → feature.extract(raw, context) → validate(result) → store.awrite()
+source.aread() → feature.aextract(raw, context) → validate(result) → store.awrite()
 ```
 
 ---

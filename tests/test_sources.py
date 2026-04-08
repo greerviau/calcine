@@ -227,7 +227,7 @@ async def test_bundle_in_pipeline(sample_df):
     from calcine.stores import MemoryStore
 
     class CombinedFeature(Feature):
-        async def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
+        def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
             frame = raw["purchases"]
             multiplier = raw["config"]["multiplier"]
             return ExtractionResult.of(

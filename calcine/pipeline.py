@@ -21,7 +21,7 @@ from .stores.base import FeatureStore
 # ProcessPoolExecutor can pickle them for inter-process dispatch.
 
 
-async def _validate_extraction(feature: Feature, result: ExtractionResult) -> list[str]:
+def _validate_extraction(feature: Feature, result: ExtractionResult) -> list[str]:
     """Validate metadata and all records in an ``ExtractionResult``.
 
     Returns a non-empty list of error strings on failure, empty on success.
@@ -35,7 +35,7 @@ async def _validate_extraction(feature: Feature, result: ExtractionResult) -> li
     multi = len(result.records) > 1
     all_errors: list[str] = []
     for sub_id, record in result.records.items():
-        for e in await feature.validate(record):
+        for e in feature.validate(record):
             all_errors.append(f"sub-entity '{sub_id}': {e}" if multi else e)
     return all_errors
 
@@ -67,9 +67,9 @@ def _run_entity_in_executor(
         t0 = time.perf_counter()
         raw = await source.aread(entity_id=entity_id, context=context)
         t1 = time.perf_counter()
-        result = await feature.extract(raw, context, entity_id=entity_id)
+        result = feature.extract(raw, context, entity_id=entity_id)
         t2 = time.perf_counter()
-        errors = await _validate_extraction(feature, result)
+        errors = _validate_extraction(feature, result)
         return result, errors, {"read": t1 - t0, "extract": t2 - t1}
 
     return asyncio.run(_work())
@@ -151,7 +151,7 @@ def _run_batch_in_executor(
         # --- Batch extract (timed; divide by batch size for per-entity average) ---
         t_extract_0 = time.perf_counter()
         try:
-            batch_results: list[ExtractionResult | BaseException] = await feature.extract_batch(
+            batch_results: list[ExtractionResult | BaseException] = feature.extract_batch(
                 valid_raws, context, entity_ids=valid_ids, entity_contexts=valid_entity_ctxs
             )
         except Exception as exc:
@@ -166,7 +166,7 @@ def _run_batch_in_executor(
                 results[idx] = result
                 continue
             try:
-                errors = await _validate_extraction(feature, result)
+                errors = _validate_extraction(feature, result)
                 results[idx] = (
                     result,
                     errors,
@@ -420,9 +420,9 @@ class Pipeline:
                 _t0 = time.perf_counter()
                 raw = await self.source.aread(entity_id=entity_id, context=entity_ctx)
                 _t1 = time.perf_counter()
-                result = await self.feature.extract(raw, entity_ctx, entity_id=entity_id)
+                result = await self.feature.aextract(raw, entity_ctx, entity_id=entity_id)
                 _t2 = time.perf_counter()
-                errors = await _validate_extraction(self.feature, result)
+                errors = _validate_extraction(self.feature, result)
                 _phase_times = {"read": _t1 - _t0, "extract": _t2 - _t1}
 
             if errors:
@@ -602,7 +602,7 @@ class Pipeline:
         try:
             batch_results: list[
                 ExtractionResult | BaseException
-            ] = await self.feature.extract_batch(
+            ] = await self.feature.aextract_batch(
                 valid_raws,
                 context,
                 entity_ids=valid_ids,
@@ -633,7 +633,7 @@ class Pipeline:
                 report.exceptions[entity_id] = result
             else:
                 try:
-                    errors = await _validate_extraction(self.feature, result)
+                    errors = _validate_extraction(self.feature, result)
                     if errors:
                         report.failed[entity_id] = errors
                     else:

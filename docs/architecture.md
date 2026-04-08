@@ -40,11 +40,15 @@ calcine is designed so that **you write sync, and the framework handles async**.
 
 ### Implementing components
 
-Override the synchronous methods — `read` on `DataSource`, and `read` / `write`
-/ `exists` / `delete` on `FeatureStore`.  The framework runs these in a thread
-executor so they never block the event loop:
+Override the synchronous methods — `extract` on `Feature`, `read` on `DataSource`,
+and `read` / `write` / `exists` / `delete` on `FeatureStore`.  The framework runs
+these in a thread executor so they never block the event loop:
 
 ```python
+class MyFeature(Feature):
+    def extract(self, raw, context, entity_id=None):
+        return ExtractionResult.of(entity_id, {"mean": raw["amount"].mean()})
+
 class MyDBSource(DataSource):
     def read(self, entity_id: str, **kwargs):
         return self.conn.execute("SELECT * FROM t WHERE id = ?", (entity_id,)).fetchall()
@@ -58,12 +62,17 @@ class MyStore(FeatureStore):
             self.db.set(self._feature_key(feature), sub_id, record)
 ```
 
-For **natively async backends** (async database drivers, async HTTP clients),
-override the `a`-prefixed methods instead (`aread`, `awrite`, `aexists`,
-`adelete`).  These are called directly by the pipeline without going through the
-executor:
+For **natively async backends** (async model clients, async database drivers,
+async HTTP clients), override the `a`-prefixed methods instead (`aextract`,
+`aread`, `awrite`, `aexists`, `adelete`).  These are called directly by the
+pipeline without going through the executor:
 
 ```python
+class AsyncEmbeddingFeature(Feature):
+    async def aextract(self, raw, context, entity_id=None):
+        vec = await self.client.embed(raw)
+        return ExtractionResult.of(entity_id, {"embedding": vec})
+
 class AsyncRedisStore(FeatureStore):
     async def aread(self, feature, entity_id):
         raw = await self.redis.get(f"{self._feature_key(feature)}:{entity_id}")

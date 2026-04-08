@@ -75,7 +75,7 @@ class UserEngagementFeature(Feature):
         }
     )
 
-    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         spend = raw["total_spend"]
         if spend is None:
             raise ValueError("total_spend is missing — cannot compute engagement features")

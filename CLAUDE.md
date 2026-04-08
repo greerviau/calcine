@@ -28,7 +28,7 @@ uv run ruff check --fix .         # lint + autofix
 
 - `DataSource`: override `def read(self, entity_id, **kwargs)`. The base class `aread` runs it in a thread executor. For native async sources (async DB drivers, async HTTP), override `aread` instead.
 - `FeatureStore`: override `def read`, `def write`, `def exists`, `def delete`. The base class `aread/awrite/aexists/adelete` wrap these in a thread executor. For native async backends, override the async methods instead.
-- `Feature`: always `async def extract(self, raw, context, entity_id=None) -> ExtractionResult`.
+- `Feature`: override `def extract(self, raw, context, entity_id=None) -> ExtractionResult`. The base class `aextract` runs it in a thread executor. For native async extraction (async model clients, async HTTP), override `aextract` instead.
 
 **`ExtractionResult`** is the universal return type from `Feature.extract`:
 - Single record: `ExtractionResult.of(entity_id, value)`
@@ -63,4 +63,4 @@ uv run ruff check --fix .         # lint + autofix
 
 ## Testing
 
-Tests are in `tests/`, mirroring the `calcine/` structure. All store tests use `await store.aread/awrite/aexists/adelete`. All source tests use `await source.aread`. Custom sources in tests use `def read` (sync). Custom stores in tests use `def read` (sync, abstract must be satisfied).
+Tests are in `tests/`, mirroring the `calcine/` structure. All store tests use `await store.aread/awrite/aexists/adelete`. All source tests use `await source.aread`. Custom sources in tests use `def read` (sync). Custom stores in tests use `def read` (sync, abstract must be satisfied). Custom features in tests use `def extract` (sync); override `aextract` only when the test requires native async behaviour.

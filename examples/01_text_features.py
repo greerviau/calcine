@@ -54,7 +54,7 @@ class ReviewStats(Feature):
         }
     )
 
-    async def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: pd.DataFrame, context: dict, entity_id: str | None = None) -> ExtractionResult:
         if raw.empty:
             raise ValueError("No reviews found for this entity")
 

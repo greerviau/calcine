@@ -74,8 +74,8 @@ class SpectrogramFeature(Feature):
         "sample_rate": types.Int64(nullable=False),
     })
 
-    async def extract(self, raw: bytes, context: dict, entity_id=None) -> ExtractionResult:
-        audio, sr = await asyncio.to_thread(librosa.load, io.BytesIO(raw), sr=None)
+    def extract(self, raw: bytes, context: dict, entity_id=None) -> ExtractionResult:
+        audio, sr = librosa.load(io.BytesIO(raw), sr=None)
         mel = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=128)
         log_mel = librosa.power_to_db(mel).T.astype("float32")  # (T, 128)
         return ExtractionResult.of(entity_id, {
@@ -155,7 +155,7 @@ pipeline = Pipeline(
 
 
 class MyFeature(Feature):
-    async def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id=None) -> ExtractionResult:
         txns = raw["transactions"]
         prof = raw["profile"]
         embs = raw["embeddings"]
@@ -184,7 +184,7 @@ class AudioSegmentFeature(Feature):
         "rms": types.Float64(nullable=False),
     })
 
-    async def extract(self, raw: bytes, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: bytes, context: dict, entity_id: str | None = None) -> ExtractionResult:
         segments = split_audio(raw)
         return ExtractionResult(
             metadata={"sample_rate": 16000, "speaker_id": "alice"},

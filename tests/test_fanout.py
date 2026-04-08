@@ -45,9 +45,7 @@ class SegmentFeature(Feature):
         }
     )
 
-    async def extract(
-        self, raw: dict, context: dict, entity_id: str | None = None
-    ) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         return ExtractionResult(
             metadata={"sample_rate": raw["sample_rate"], "speaker_id": raw.get("speaker_id")},
             records={
@@ -62,9 +60,7 @@ class NoMetaSegmentFeature(Feature):
 
     schema = FeatureSchema({"value": types.Float64(nullable=False)})
 
-    async def extract(
-        self, raw: dict, context: dict, entity_id: str | None = None
-    ) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         return ExtractionResult(
             records={f"{entity_id}/{i}": {"value": v} for i, v in enumerate(raw["values"])}
         )
@@ -76,9 +72,7 @@ class BadMetaFeature(Feature):
     metadata_schema = FeatureSchema({"count": types.Int64(nullable=False)})
     schema = FeatureSchema({"v": types.Float64(nullable=False)})
 
-    async def extract(
-        self, raw: dict, context: dict, entity_id: str | None = None
-    ) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         return ExtractionResult(
             metadata={"count": "not-an-int"},  # should fail validation
             records={f"{entity_id}/0": {"v": 1.0}},
@@ -90,9 +84,7 @@ class BadRecordFeature(Feature):
 
     schema = FeatureSchema({"v": types.Float64(nullable=False)})
 
-    async def extract(
-        self, raw: dict, context: dict, entity_id: str | None = None
-    ) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         return ExtractionResult(
             records={
                 f"{entity_id}/0": {"v": 1.0},
@@ -104,9 +96,7 @@ class BadRecordFeature(Feature):
 class RaisingFeature(Feature):
     """Feature that raises during extract."""
 
-    async def extract(
-        self, raw: dict, context: dict, entity_id: str | None = None
-    ) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         raise ValueError("boom")
 
 
@@ -407,7 +397,7 @@ async def test_awrite_single_record_no_tombstone():
     store = MemoryStore()
 
     class SingleFeature(Feature):
-        async def extract(self, raw, context, entity_id=None):
+        def extract(self, raw, context, entity_id=None):
             return ExtractionResult.of(entity_id, {"v": raw})
 
     feature = SingleFeature()

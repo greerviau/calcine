@@ -288,20 +288,43 @@ from calcine.features.base import Feature
 ### extract()
 
 ```python
-async def extract(self, raw: Any, context: dict, entity_id: str | None = None) -> ExtractionResult
+def extract(self, raw: Any, context: dict, entity_id: str | None = None) -> ExtractionResult
 ```
 
 The method every `Feature` subclass must implement. `raw` is whatever the
-`DataSource` returned; `context` is the merged dict from `generate()`;
-`entity_id` is the current entity being processed.
+`DataSource` returned; `context` is the merged dict from `generate()`; `entity_id`
+is the current entity being processed.
 
 Return `ExtractionResult.of(entity_id, value)` for single-record features, or
 `ExtractionResult(records={...}, metadata={...})` for fan-out.
 
+The framework calls `aextract` internally, which runs `extract` in a thread
+executor by default.
+
+### aextract()
+
+```python
+async def aextract(self, raw: Any, context: dict, entity_id: str | None = None) -> ExtractionResult
+```
+
+The async variant called by the pipeline. By default wraps `extract` in a thread
+executor. Override this instead of `extract` for natively async extraction (async
+model clients, async HTTP):
+
+```python
+class EmbeddingFeature(Feature):
+    async def aextract(self, raw, context, entity_id=None):
+        vec = await self.async_client.embed(raw)
+        return ExtractionResult.of(entity_id, {"embedding": vec})
+
+    def extract(self, raw, context, entity_id=None):  # satisfies abstract requirement
+        raise NotImplementedError("use aextract")
+```
+
 ### extract_batch()
 
 ```python
-async def extract_batch(
+def extract_batch(
     self,
     raws: list[Any],
     context: dict,
@@ -314,10 +337,13 @@ Override for vectorised computation. The default implementation calls `extract`
 for each item individually. Return one element per input, in the same order.
 Individual failures can be returned as `BaseException` instances.
 
+The framework calls `aextract_batch` internally. Override `aextract_batch`
+instead when your batch API is natively async.
+
 ### validate()
 
 ```python
-async def validate(self, result: Any) -> list[str]
+def validate(self, result: Any) -> list[str]
 ```
 
 Called automatically by the pipeline after extraction. Uses `schema.validate`

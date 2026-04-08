@@ -90,7 +90,7 @@ class UserRiskScore(Feature):
         }
     )
 
-    async def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
+    def extract(self, raw: dict, context: dict, entity_id: str | None = None) -> ExtractionResult:
         txns = raw["transactions"]  # DataFrame
         txns = txns.drop(columns=["helpful_votes", "category", "review"], errors="ignore")
         profile = raw["profile"]  # Series (one row)
