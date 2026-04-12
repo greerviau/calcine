@@ -16,12 +16,12 @@ validated feature extraction pipelines — over any data source and any storage
 backend, with no lock-in on format or framework.
 
 **Key features:**
-- **Pipeline orchestration** Concurrent entity processing with per-entity error isolation, incremental generation, and partition-by support
-- **Type-safe schemas** Validate scalars, strings, categoricals, ndarrays, bytes, lists, and dicts on write and read
-- **Detailed reporting** `GenerationReport` tracks successes, failures, and skips; `timing_summary()` gives p50/p95/max per phase (read / extract / write); exports to a pandas DataFrame
-- **Fan-out extraction** `extract()` returns one or many records; each sub-entity is stored, validated, and retrievable independently
-- **Composable sources** `SourceBundle` reads from multiple sources concurrently, delivering a single `dict` to `extract`
-- **Executor support** Offload CPU-bound extraction to thread or process pools via `executor=`
+- **Pipeline orchestration:** Concurrent entity processing with per-entity error isolation, incremental generation, and partition-by support
+- **Type-safe schemas:** Validate scalars, strings, categoricals, ndarrays, bytes, lists, and dicts on write and read
+- **Detailed reporting:** `GenerationReport` tracks successes, failures, and skips; `timing_summary()` gives p50/p95/max per phase (read / extract / write); exports to a pandas DataFrame
+- **Fan-out extraction:** `extract()` returns one or many records; each sub-entity is stored, validated, and retrievable independently
+- **Composable sources:** `SourceBundle` reads from multiple sources concurrently, delivering a single `dict` to `extract`
+- **Executor support:** Offload CPU-bound extraction to thread or process pools via `executor=`
 
 ## Installation
 
