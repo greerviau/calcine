@@ -15,26 +15,19 @@ calcine gives you a clean three-part abstraction for building reproducible,
 validated feature extraction pipelines — over any data source and any storage
 backend, with no lock-in on format or framework.
 
----
-
-## Key Features
-
-- **Pipeline orchestration** — concurrent entity processing with a semaphore cap; per-entity error isolation so valid results are always stored even when others fail; incremental generation skips already-stored entities; partition-by support for rate-limit-per-account and ordered-per-user scenarios
-- **Type-safe schemas** — validate scalars, strings, categoricals, ndarrays, bytes, lists, and dicts before anything hits the store; the same schema validates on read, making it a typed contract between feature producers and consumers
-- **Detailed reporting** — `GenerationReport` tracks successes, failures, and skips with per-phase timing (read / extract / write); `timing_summary()` surfaces p50/p95/max per phase so you can pinpoint bottlenecks; `error_summary()` groups failures by message; exports to a pandas DataFrame
-- **Fan-out extraction** — `extract()` returns an `ExtractionResult` with one or many records; each sub-entity is stored, validated, and retrievable independently
-- **Composable sources** — `SourceBundle` reads from multiple sources concurrently and delivers a single `dict` to `extract`; combine any data origins without changing the pipeline
-- **Executor support** — offload CPU-bound extraction to thread or process pools via `executor=`; store writes always remain in the main process so all store backends work correctly
-
----
+**Key features:**
+- **Pipeline orchestration** Concurrent entity processing with per-entity error isolation, incremental generation, and partition-by support
+- **Type-safe schemas** Validate scalars, strings, categoricals, ndarrays, bytes, lists, and dicts on write and read
+- **Detailed reporting** `GenerationReport` tracks successes, failures, and skips; `timing_summary()` gives p50/p95/max per phase (read / extract / write); exports to a pandas DataFrame
+- **Fan-out extraction** `extract()` returns one or many records; each sub-entity is stored, validated, and retrievable independently
+- **Composable sources** `SourceBundle` reads from multiple sources concurrently, delivering a single `dict` to `extract`
+- **Executor support** Fffload CPU-bound extraction to thread or process pools via `executor=`
 
 ## Installation
 
 ```bash
 pip install calcine
 ```
-
----
 
 ## Quick start
 
@@ -132,8 +125,6 @@ pipeline.generate(entity_ids=new_recording_ids, overwrite=False)
 
 See [`examples/basic_usage.py`](examples/basic_usage.py) for a fully runnable version with a simulated async source, bad-data handling, and incremental generation.
 
----
-
 ## Multiple sources with SourceBundle
 
 When your feature needs data from more than one place, compose sources with
@@ -163,8 +154,6 @@ class MyFeature(Feature):
 ```
 
 No assumptions are made about what the sources represent or how they relate.
-
----
 
 ## Fan-out extraction
 
@@ -205,8 +194,6 @@ single-record features. For fan-out, pass `records` directly with sub-entity IDs
 Parent metadata and sub-entity records are stored under separate keys;
 `overwrite=False` skips the source entity if its parent key already exists.
 
----
-
 ## Schema system
 
 ```python
@@ -234,8 +221,6 @@ errors = schema.validate(arr)   # validates the array directly
 ```
 
 See [`docs/schema.md`](docs/schema.md) for the full reference.
-
----
 
 ## Built-in components
 

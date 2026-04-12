@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  check-version:
+    name: Validate version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check pyproject.toml version matches tag
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "Version mismatch: pyproject.toml=$VERSION tag=$TAG"
+            exit 1
+          fi
+          echo "Version OK: $VERSION"
+
+  publish:
+    name: Publish to PyPI
+    needs: check-version
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Build
+        run: uv build
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
