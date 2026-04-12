@@ -21,7 +21,7 @@ backend, with no lock-in on format or framework.
 - **Detailed reporting** `GenerationReport` tracks successes, failures, and skips; `timing_summary()` gives p50/p95/max per phase (read / extract / write); exports to a pandas DataFrame
 - **Fan-out extraction** `extract()` returns one or many records; each sub-entity is stored, validated, and retrievable independently
 - **Composable sources** `SourceBundle` reads from multiple sources concurrently, delivering a single `dict` to `extract`
-- **Executor support** Fffload CPU-bound extraction to thread or process pools via `executor=`
+- **Executor support** Offload CPU-bound extraction to thread or process pools via `executor=`
 
 ## Installation
 
