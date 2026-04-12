@@ -12,8 +12,10 @@ DataSource  ──►  Feature  ──►  FeatureStore
 ```
 
 calcine gives you a clean three-part abstraction for building reproducible,
-validated feature extraction pipelines — over any data source and any storage
+validated feature extraction pipelines over any data source and any storage
 backend, with no lock-in on format or framework.
+
+It is a good fit if you are building offline feature generation for model training, processing large entity sets (users, documents, recordings) into typed feature stores, or replacing ad-hoc scripts with a pipeline that handles concurrency, error isolation, and incremental updates.
 
 **Key features:**
 - **Pipeline orchestration:** Concurrent entity processing with per-entity error isolation, incremental generation, and partition-by support
