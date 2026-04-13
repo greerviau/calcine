@@ -126,7 +126,7 @@ pipeline.generate(
 )
 
 class MyFeature(Feature):
-    async def extract(self, raw, context, entity_id=None):
+    def extract(self, raw, context, entity_id=None):
         tier = context["tier"]       # "premium" or "free"
         version = context["model_version"]
         ...
@@ -174,16 +174,30 @@ class EmbeddingFeature(Feature):
     def __init__(self, model):
         self.model = model
 
-    async def extract(self, raw: str, context, entity_id=None):
-        vec = await asyncio.to_thread(self.model.encode, [raw])
+    def extract(self, raw: str, context, entity_id=None):
+        vec = self.model.encode([raw])
         return ExtractionResult.of(entity_id, {"embedding": vec[0]})
 
-    async def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
-        vecs = await asyncio.to_thread(self.model.encode, raws)
+    def extract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
+        vecs = self.model.encode(raws)
         return [
             ExtractionResult.of(eid, {"embedding": vec})
             for eid, vec in zip(entity_ids, vecs)
         ]
+```
+
+For a model with a native async API, override `aextract_batch` instead:
+
+```python
+    async def aextract_batch(self, raws, context, entity_ids=None, entity_contexts=None):
+        vecs = await self.async_model.encode(raws)
+        return [
+            ExtractionResult.of(eid, {"embedding": vec})
+            for eid, vec in zip(entity_ids, vecs)
+        ]
+
+    def extract(self, raw, context, entity_id=None):  # satisfies abstract requirement
+        raise NotImplementedError("use aextract_batch")
 ```
 
 Return one element per input. Individual items can be `BaseException` instances
@@ -450,17 +464,26 @@ from calcine.sources.base import DataSource
 ### read()
 
 ```python
-def read(self, entity_id: str | None = None, **kwargs) -> Any
+def read(self, entity_id: str, **kwargs) -> Any
 ```
 
 Implement this for synchronous sources. The framework runs it in a thread
-executor via `aread`. Accept `entity_id` as a keyword argument and scope
-results to it.
+executor via `aread`, passing `entity_id` as a keyword argument.
+
+The base class signature is `def read(self, **kwargs)` — `entity_id` arrives
+as a keyword argument from the pipeline. Declare it explicitly in your
+implementation for clarity:
+
+```python
+class MySource(DataSource):
+    def read(self, entity_id: str, **kwargs) -> Any:
+        return self.db.get(entity_id)
+```
 
 ### aread()
 
 ```python
-async def aread(self, entity_id: str | None = None, **kwargs) -> Any
+async def aread(self, entity_id: str, **kwargs) -> Any
 ```
 
 Override this instead of `read` for natively async sources (async HTTP

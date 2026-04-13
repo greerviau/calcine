@@ -148,8 +148,8 @@ changes the keys under which data is addressable, the generation report becomes
 meaningless, `overwrite=False` breaks, and consumers disagree on what ID refers
 to what data.
 
-**Fan-out and sub-entity IDs:** When `Feature.extract_many()` is used, the
-feature itself defines the sub-entity ID scheme (e.g. `f"{entity_id}/{i}"`).
+**Fan-out and sub-entity IDs:** When `Feature.extract` returns multiple records,
+the feature itself defines the sub-entity ID scheme (e.g. `f"{entity_id}/{i}"`).
 These IDs are part of the feature's documented contract, not an internal store
 detail. See [Fan-out extraction](#fan-out-extraction) below.
 
@@ -205,7 +205,7 @@ errors = schema.validate(arr)   # validates arr directly, not a dict
 ```
 
 **Fan-out features** use two schemas: `schema` validates each sub-entity
-record; `parent_schema` validates the optional shared parent metadata. See
+record; `metadata_schema` validates the optional shared parent metadata. See
 [Fan-out extraction](#fan-out-extraction).
 
 ---
@@ -216,18 +216,11 @@ Standard extraction is 1:1: one entity_id produces one stored value.
 Fan-out extraction is 1:many: one source entity produces multiple
 independently-stored sub-entity records.
 
-Implement `extract_many()` instead of `extract()` to opt in:
-
-```python
-@dataclass
-class FanOutResult:
-    records:  dict[str, Any]              # sub_id → value; validated against schema
-    metadata: dict[str, Any] | None = None  # parent-level; validated against parent_schema
-```
+Return an `ExtractionResult` with multiple entries in `records` from `extract`:
 
 ```python
 class AudioSegmentFeature(Feature):
-    parent_schema = FeatureSchema({       # optional; for shared source-level metadata
+    metadata_schema = FeatureSchema({     # optional; for shared source-level metadata
         "sample_rate": types.Int64(nullable=False),
         "speaker_id":  types.String(nullable=True),
     })
@@ -236,12 +229,10 @@ class AudioSegmentFeature(Feature):
         "rms":  types.Float64(nullable=False),
     })
 
-    async def extract_many(
-        self, raw: bytes, context: dict, entity_id: str
-    ) -> FanOutResult:
+    def extract(self, raw: bytes, context: dict, entity_id: str | None = None) -> ExtractionResult:
         header   = parse_header(raw)
         segments = segment_audio(raw, window_ms=100)
-        return FanOutResult(
+        return ExtractionResult(
             metadata={
                 "sample_rate": header.sample_rate,
                 "speaker_id":  header.speaker_id,
@@ -268,10 +259,9 @@ portability and consumer consistency.
 ("AudioSegmentFeature", "recording_001/1")
 ```
 
-Stores may override `write_fanout(feature, entity_id, result)` to write
-parent metadata and sub-entity records atomically (e.g. in a single SQL
-transaction). The default implementation calls `write()` for each entry
-individually.
+`write` is called once with the full `ExtractionResult`. The store is
+responsible for persisting all sub-entity records and, if present, the parent
+metadata under `entity_id`.
 
 ---
 
@@ -311,8 +301,8 @@ recommended because it makes the hierarchy self-evident in the store and
 enables prefix-based listing:
 
 ```python
-sub_ids  = store.list_entities(AudioSegmentFeature, prefix="recording_001/")
-segments = store.read_many(AudioSegmentFeature, sub_ids)
+sub_ids  = store.list_entities(feature, prefix="recording_001/")
+segments = [store.read(feature, sid) for sid in sub_ids]
 ```
 
 ---
